@@ -1,0 +1,865 @@
+---
+title: "Linear mixed effects models using R 2013"
+output: html_document
+---
+
+
+
+```{r}
+
+#install.packages("/Users/yazhuodeng/Downloads/nlmeU_0.70-3.tar", repos = NULL, type = "source")
+
+library(nlmeU)
+#data(package = "nlmeU")
+
+library(lme4)   # using lmer()
+library(lattice)
+library(nlme)
+```
+
+
+
+## Age-Related Macular Degeneration (ARMD) Trial
+
+ARMD data in wide format: `armd.wide`
+
+```{r}
+str(armd.wide)
+head(armd.wide)
+
+#variance covariance and correlation matrices for visual acuity measurements for complete cases only n=188
+visual.x<-subset(armd.wide, select = c(visual0:visual52))
+(varx<-var(visual.x, use = "complete.obs"))
+
+print(cor(visual.x, use = "complete.obs"), digits = 2)
+diag(varx)      # Var-cov diagonal elements
+#cov2cor(varx)    # Corr mtx (alternative way)
+
+# Model frame created by evaluating a formula in the context of the armd.wide data
+
+# (a) Formula
+form1 <- formula(visual52 ~ 
+                     sqrt(line0) + # Continuous explanatory variable # Factor with 4 levels
+                     factor(lesion) + # factor with 4 levels
+                     treat.f*log(visual24) +  # Crossing of two variables
+                     poly(visual0, 2))   # Polynomial of 2nd degree
+
+# (b) Model frame
+#model.frame (a generic function) and its methods return a data.frame with the variables needed to use formula and any ... arguments.
+armd.mf1 <- model.frame(form1, #formula
+                        data = armd.wide,
+                        subset = !(subject %in% c("1", "2")), # Exclude two subjects
+                        na.action = na.exclude,
+                        SubjectId = subject) # Identifier of data records
+class(armd.mf1)
+
+names(armd.mf1)
+
+head(armd.mf1, n=4)
+
+# The attribute terms of the armd.mf1 model frame. The model frame was created in Panel R5.5
+
+terms.mf1 <- attr(armd.mf1, "terms") # terms attribute
+names(attributes(terms.mf1)) # Names of attributes
+attr(terms.mf1, "dataClasses")  # dataClasses attribute
+attr(terms.mf1, "predvars") # predvars attribute
+
+labels(terms.mf1)  # Component names
+
+# Creating a design matrix based on a formula evaluated in a model frame. The model frame armd.mf1 was created in Panel R5.5
+
+Xmtx <- model.matrix(form1, armd.mf1) # Design matrix
+dim(Xmtx) 
+(nms <- colnames(Xmtx)) # Col names ...
+colnames(Xmtx) <- abbreviate(nms) # ... abbreviated
+print(head(Xmtx, n = 6), digits = 4) # round to 4 digits
+
+
+```
+
+ARMD data in long format: `armd0`
+
+```{r}
+dim(armd0)
+str(armd0)
+
+#counts of nonmissing visual acuity measurements
+attach(armd0)
+#by factors
+flst<-list(time.f, treat.f)
+#counts
+(tN<-tapply(visual,flst, FUN = function(x) length(x[!is.na(x)])))
+#table(flst)
+
+#sample means and medians of visual acuity measurements
+tMn<-tapply(visual, flst, mean)
+tMd<-tapply(visual, flst, median)
+colnames(res <-cbind(tN,tMn,tMd))
+nms1<-rep(c("P","A"),3)
+nms2<-rep(c("n","Mean","Mdn"), rep(2,3))
+colnames(res)<-paste(nms1, nms2, sep = ":")
+res
+detach(armd0)
+
+# box and whiskers plot
+library(lattice)
+bw1<-bwplot(visual ~ time.f | treat.f, data=armd0)
+xlims<- c("Base","4\nwks", "12\nwks","24\nwks","52\nwks")
+update(bw1, xlim = xlims, pch ="|")
+#detach(package:lattice)
+
+#the plot of visual acuity profiles for selected patients in Fig. 3.1
+#Subset
+armd0.subset <- subset(armd0, as.numeric(subject) %in% seq(1, 240, 10))
+
+xy1 <- xyplot(visual ~ jitter(time) | treat.f, 
+              groups = subject, 
+              data = armd0.subset, 
+              type = "l", lty = 1)
+
+update(xy1,
+       xlab = "Time (in weeks)",
+       ylab = "Visual acuity",
+       grid = "h")
+
+
+
+```
+
+#### Chapter 6 ARMD Trial: Linear Model with Homogeneous Variance
+$VISUAL_{it} = \beta_{0t} + \beta_1 * VISUAL0_i + \beta_{2t}* TREAT_i + \epsilon_{it}$ (6.1)
+
+Homogeneous variance $\epsilon_{it} \sim N(0, \sigma^2) $
+
+```{r}
+#subsetting data in the long format: `armd` (removing baseline measurement)
+
+dim(armd)
+str(armd)
+
+#The design matrix for the linear Fixed effects model M6.1
+lm1.form <- formula(visual ~ -1 + visual0 + time.f + treat.f:time.f )
+vis.lm1.mf <- model.frame(lm1.form, armd) # Model frame
+vis.lm1.dm <- model.matrix(lm1.form, vis.lm1.mf) # Design matrix X
+dim(vis.lm1.dm) # Dimensions
+
+(nms <- colnames(vis.lm1.dm)) #Long column names ...
+
+nms <- abbreviate(nms)  #... abbreviated
+colnames(vis.lm1.dm) <- nms # ... assigned.
+head(vis.lm1.dm, n = 6)  #X matrix. Six rows.
+attr(vis.lm1.dm, "contrasts") # Contrasts attribute.
+
+# The linear model M6.1, fitted using the lm() function. The formula-object lm1.form was defined in Panel R6.1
+
+#(a) Model fit and parameter estimates
+lm6.1 <- lm(lm1.form, data = armd)
+summ <- summary(lm6.1)
+tT <- coef(summ)
+rownames(tT) # Fixed effects (beta) names
+
+rownames(tT) <- abbreviate(rownames(tT))
+
+printCoefmat(tT, P.values = TRUE)
+
+summ$sigma
+
+#(b) Sequential-approach F-tests  
+anova(lm6.1)
+
+#The 95% confidence intervals for fixed effects and residual standard deviation for the linear model M6.1, fitted using the gls() function.
+
+fm6.1 <- nlme::gls(lm1.form, data = armd)
+nlme::intervals(fm6.1)
+
+```
+
+Note that the p value for the F-test for `time.f:treat.f` indicates a statistically significant result of the test at the 5% significance level. This suggests the presence of a time-varying treatment effect. 
+
+
+```{r}
+plot(fitted(lm6.1), resid(lm6.1)) # Fig.6.1a Residuals versus fitted values
+abline(h = seq(-40, 40, by = 20), col = "grey") 
+abline(v = seq( 10, 80, by = 10), col = "grey")
+#plot(predict(fm6.1), residuals(fm6.1))  #gls() function residuals same as Fig.6.1a
+
+qqnorm(resid(lm6.1)); qqline(resid(lm6.1)) # Fig.6.1b normal Q–Q plot of the raw residuals
+#qqnorm(residuals(fm6.1)); qqline(residuals(fm6.1)) #gls() function residuals same as Fig.6.1b
+```
+
+ The generic function `plot()` plots the residuals against the fitted values, i.e., against the estimated values of the linear predictor specified on the right-hand side of the model equation (6.1). The (vertical) width of the scatterplot clearly increases with increasing fitted values, which implies a nonconstant residual variance.
+ 
+The shape of the Q-Q plot clearly deviates from a straight line. This may be an indication of a problem with the normality of the residuals. However, it may also be the effect of ignored heteroscedasticity and/or correlation of the visual acuity measurements. In any case, both the scatterplot in Fig. 6.1a and the Q–Q plot in Fig. 6.1b indicate problems with the fit of model M6.1.
+
+
+#### Chapter 9 ARMD Trial: Linear Model with Heterogeneous Variance
+
+$VISUAL_{it} = \beta_{0t} + \beta_1 * VISUAL0_i + \beta_{2t}* TREAT_i + \epsilon_{it}$ (9.1)
+
+Heterogeneous variance $\epsilon_{it} \sim N(0, \sigma^2_t) $
+
+```{r}
+#Estimates and confidence intervals for timepoint-specific variance for model M9.1
+fm9.1 <- gls(lm1.form, weights = varIdent(form = ~1|time.f), data = armd)
+summary(fm9.1)
+(intervals(fm9.1, which = "var-cov"))
+
+#(b) REML-based Likelihood Ratio test of homoscedasticity. The object fm6.1 was created in Panel R6.3 
+anova(fm6.1, fm9.1)
+
+# (a) Models with various variance functions
+fm9.2 <-update(fm9.1, weights = varPower(form = ~time))
+fm9.3 <-update(fm9.1, weights = varPower(form = ~time|treat.f)) #strata=treat.f
+fm9.4 <-update(fm9.1, weights = varPower())
+fm9.5 <-update(fm9.1, weights = varPower(fixed = 1))
+
+
+
+```
+
+Model M9.3, introduced in Sect. 9.3, with a variance function in the form of a power function of time, showed the best fit among the models considered in Chap. 9.
+
+Strictly speaking, the model is not suitable for the analysis of this dataset, as it ignores the dependence of visual acuity measurements obtained for the same individual. 
+
+
+#### Chapter 12 ARMD Trial: Modeling Correlated Errors for Visual Acuity
+
+```{r}
+# Model M12.1 with a compound-symmetry correlation structure
+require(nlme)
+fm12.1 <- gls(lm1.form, weights = varPower(form = ~time), correlation = corCompSymm(form = ~1|subject), data = armd)
+
+#95% CIs for the variance-covariance parameters
+intervals(fm12.1, which = "var-cov")
+
+#Estimated variance-covariance structure of the fitted model M12.1. 
+#(a) The marginal variance-covariance structure
+fm12.1vcov <- getVarCov(fm12.1, individual = "2")
+nms <- c("4wks", "12wks", "24wks", "52wks")
+dnms <- list(nms, nms)
+dimnames(fm12.1vcov) <- dnms 
+print(fm12.1vcov)
+
+#(b) Test of independence vs. compound-symmetry correlation structure 
+anova(fm9.2, fm12.1)
+```
+
+The `correlation = corCompSymm(form = ~1|subject)` argument indicates that we use the same correlation coefficient for different observations for each level of the `subject` factor. That is, we allow for a constant correlation of visual acuity measurements made at different timepoints for the same patient. Note that we do not explicitly specify the method argument. Thus, the default value, i.e., `method="REML"`, is used.
+
+```{r}
+#Model M12.2 with an AR(1) correlation structure. 
+fm12.2 <- update(fm9.2, correlation = corAR1(form = ~tp|subject), data = armd)
+intervals(fm12.2, which = "var-cov")
+
+#Estimated variance-covariance structure of the fitted model M12.2 with an AR(1) correlation structure.
+
+#(a) The marginal variance-covariance structure
+fm12.2vcov <- getVarCov(fm12.2, individual = "2")
+dimnames(fm12.2vcov) <- dnms 
+fm12.2vcov
+
+fm12.2cor <- cov2cor(fm12.2vcov) 
+print(fm12.2cor, digits = 2,
+      corr = TRUE, stdevs = FALSE)
+
+#(b) Compound-symmetry vs. autoregressive correlation (nonnested models)
+anova(fm12.1, fm12.2)
+
+#Model M12.3 with a general correlation structure. 
+fm12.3 <- update(fm12.2, correlation = corSymm(form = ~tp|subject), data = armd)
+intervals(fm12.3, which = "var-cov")
+
+#Estimated variance-covariance structure of the fitted model M12.3 with a general variance-covariance structure. 
+
+fm12.3vcov <- getVarCov(fm12.3, individual = "2")
+
+dimnames(fm12.3vcov) <- dnms
+fm12.3vcov
+
+fm12.3cor <- cov2cor(fm12.3vcov)
+print(fm12.3cor, corr = TRUE, stdevs = F)
+
+#Tests of hypotheses about the variance-covariance parameters of model M12.3. 
+#(a) Autoregressive of order 1 vs. a general correlation structure
+anova(fm12.2, fm12.3)
+
+#(b) Power-of-time variance function vs. timepoint-specific variances
+fmA.vc <- update(fm12.3, weights = varIdent(form = ~1|time.f)) # Alternative model
+anova(fm12.3, fmA.vc)
+
+```
+These results indicate that, as compared to the model with the general variance and correlation structures, the simpler model M12.3 provides an adequate summary of the data.
+
+```{r}
+#Residual plots for model M12.3. 
+
+#(a) Plots (and boxplots) of raw residuals
+panel.bwxplot0 <- 
+  function(x,y, subscripts, ...) 
+    {
+    panel.grid(h = -1)
+    panel.stripplot(x, y, col = "grey", ...)
+    panel.bwplot(x, y, pch = "|", ...)
+    }
+
+bwplot(resid(fm12.3) ~ time.f | treat.f, 
+       panel = panel.bwxplot0,
+       ylab = "Residuals", data = armd) #Fig. 12.2
+#(b) Plots of Pearson residuals vs. fitted values
+plot(fm12.3) # Fig. 12.3a
+plot(fm12.3, resid(., type = "p") ~ fitted(.) | time.f) # Fig. 12.3b
+stdres.plot <- plot(fm12.3, resid(., type = "p") ~ jitter(time) | treat.f, id = 0.01, adj = c(-0.3, 0.5 ), grid = FALSE)
+plot(update(stdres.plot, xlim = c(-5,59), ylim = c(-4.9, 4.9), grid = "h")) # Fig. 12.4
+
+
+#(c) Plots (and boxplots) of normalized residuals
+bwplot(resid(fm12.3, type = "n") ~ 
+         time.f | treat.f, panel = panel.bwxplot0, data = armd)      # Fig.12.7
+qqnorm(fm12.3, ~resid(., type = "n") | time.f)  # Fig.12.8
+
+#Sequential F-tests for fixed effects of model M12.3
+
+anova(update(fm12.3, method = "ML")) # M12.3
+
+```
+
+
+Model M12.3a
+$VISUAL_{it} = \beta_0 + \beta_{0t} + \beta_1 * VISUAL0_i + \beta_{2}* TREAT_i + \beta_{2t}*TREAT_i+ \epsilon_{it}$ (12.7)
+
+Model M12.4
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_t + \beta_3* TREAT_i + \beta_4*TIME_t*TREAT_i+ \epsilon_{it}$ (12.8)
+
+model M12.5 is obtained by removing the interaction between time and treatment from (12.8):
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_t + \beta_3* TREAT_i + \epsilon_{it}$ (12.9)
+
+```{r}
+#(a) Models needed for LR test
+lm1a.form <- formula (visual ~ visual0 + time.f + treat.f + time.f:treat.f)# (12.7)
+fm12.3a <- update(fm12.3, lm1a.form, method="ML", data=armd)
+lm2.form <- formula(visual ~ visual0 + time + treat.f + treat.f:time) # (12.8)
+fm12.4 <- update(fm12.3, lm2.form, method="ML", data=armd)
+lm3.form <- update(lm2.form, . ~ . - treat.f:time) # (12.9)
+fm12.5 <- update(fm12.3, lm3.form, method="ML", data=armd)
+
+#(b) LR test for the mean linear time trend and interaction term
+anova(fm12.3a, fm12.4, fm12.5)
+#(c) Sequential-approach F-tests for terms in model M12.5 
+anova(fm12.5)
+
+#The estimated variance-covariance and correlation matrices for the model M12.5. 
+
+fm12.5vcov <- getVarCov(fm12.5, individual="2")
+dimnames(fm12.5vcov) <- dnms
+fm12.5vcov
+fm12.5cor <- cov2cor(fm12.5vcov)
+print(fm12.5cor, corr=TRUE, stdevs=FALSE)
+```
+
+ The final model was model M12.5. Its mean structure was defined by (12.9), while the variance-covariance structure was defined by the power variance function (12.3) and the general correlation structure (12.6). The model accounted for the correlation between the visual acuity measurements obtained for the same individual. Given that it provided an acceptable fit to the data, it could be used for inference about the mean and variance-covariance structure.
+
+#### Model with Random Intercepts and Homogeneous Residual Variance
+
+Model M16.1 is specified as follows:
+
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_{it} + \beta_3* TREAT_i + \beta_4*TIME_{it}*TREAT_i+ b_{0i} +\epsilon_{it}$ (16.1)
+
+```{r}
+#Model M16.1 fitted using the function lme()
+lm2.form <-  formula(visual ~ visual0 + time + treat.f + treat.f:time) # (16.1)
+(fm16.1 <-lme(lm2.form, random = ~1|subject, data = armd))
+
+printCoefmat(summary(fm16.1)$tTable, # Print fixed-effects, etc.
+             has.Pvalue = TRUE, P.values = TRUE) # ... with p-values
+
+#Data grouping/hierarchy implied by model M16.1.
+getGroupsFormula(fm16.1) # Grouping formula
+str(grpF <- getGroups(fm16.1)) # Grouping factor
+grpF[1:17]
+levels(grpF)[1:5]
+range(xtabs(~grpF)) # Min, Max no. of observations
+
+#The estimated variance-covariance matrices for random effects and residual errors for model M16.1. 
+#variance-covariance matrix for random effects
+getVarCov(fm16.1, individual = "2")
+VarCorr(fm16.1)
+
+#variance-covariance matrix for residual errors
+getVarCov(fm16.1, type = "conditional", individual = "2")
+
+#The estimated marginal variance-covariance matrix and the corresponding correlation matrix for model M16.1.
+(fm16.1cov <-getVarCov(fm16.1, type = "marginal", individual = "2"))
+(cov2cor(fm16.1cov[[1]])) # correlation matrix
+
+```
+
+#### A Model with Random Intercepts and the varPower(·) Residual Variance-Function
+
+To specify the new model, labeled **M16.2**, we use the same fixed-effects part as in model M16.1. However, we modify the variance-covariance structure of residual random errors, specified in (16.6). More specifically, following the results obtained in Chaps.9 and 12, we consider the use of the varPower(·) variance function, introduced in Sect. 7.3.1. 
+
+```{r}
+#Model M16.2 fitted using the function lme(). 
+(fm16.2 <- update(fm16.1, 
+                  weights = varPower(form = ~ time), 
+                  data = armd))
+
+#The estimated variance of random intercepts is equal to 59.376. it is smaller than the value of 80.608, obtained for model M16.1 (see Panel R16.3). This is expected, because, by allowing for heteroscedastic residual random errors, a larger part of the total variability is explained by the residual variances.
+VarCorr(fm16.2)
+
+#The estimated variance-covariance matrix of the residual errors
+getVarCov(fm16.2, type = "conditional", individual = "2")
+
+#The estimated marginal variance-covariance matrix
+(fm16.2cov <- getVarCov(fm16.2, type = "marginal", individual = "2"))
+cov2cor(fm16.2cov[[1]]) # Corr
+
+#Residual plots for model M16.2. 
+#(a) Default residual plot of conditional Pearson residuals
+plot(fm16.2) # Fig.16.1
+
+#(b) Plots (and boxplots) of Pearson residuals per time and treatment
+#we apply the type="pearson" argument in the resid() function, which indicates the use of the Pearson residuals.we use the term ~time|treat to obtain plots per treat- ment group over time in separate panels. Additionally, by applying the argument id=0.05 to the plot() statement, we label the residuals larger, in absolute value, than the 97.5th percentile of the standard normal distribution by the number of the corresponding observation from the armd data frame.
+plot(fm16.2, resid(., type = "pearson") ~ time | treat.f, id = 0.05)
+#box-and-whiskers plots
+#The key component of the bwplot()-function call is an auxiliary panel-function panel.bwxplot2. Due to the complexity of the R code used to create the panel function, we do not present it; however, the code is available in the package nlmeU containing the supplementary materials for the book.
+#lattice::bwplot(resid(fm16.2, type = "p") ~ time.f | treat.f, panel = panel.bwxplot2, data = armd)
+
+#(c) Normal Q-Q plots of Pearson residuals and predicted random effects
+qqnorm(fm16.2, ~resid(.) | time.f) # Fig.16.3
+qqnorm(fm16.2, ~ranef(.)) # Fig.16.4
+
+#The list of outlying conditional Pearson residuals for model M16.2.
+
+id <- 0.05 # Argument for qnorm()
+outliers.idx <- within(armd,
+                       {
+                         resid.p <- resid(fm16.2, type = "pearson") # Pearson resids.
+                         idx <- abs(resid.p) > -qnorm(id/2) # Indicator vector
+                         })
+
+outliers <- subset(outliers.idx, idx) # Data with outliers
+nrow(outliers)  # Number of outliers
+outliers$subject # IDs of outliers
+```
+
+#### Models with Random Intercepts and Slopes and the varPower(·) Residual Variance-Function
+
+To specify model M16.3 with a general variance-covariance matrix, we modify
+the model equation (16.1) as follows:
+
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_{it} + \beta_3* TREAT_i + \beta_4*TIME_{it}*TREAT_i+ b_{0i} +b_{2i}*TIME_{it} +\epsilon_{it}$ (16.10)
+
+
+
+```{r}
+#The estimated D􏰂 matrix and confidence intervals for the qD parameters for model M16.3.
+fm16.3 <- update(fm16.2, random = ~1 + time | subject, data = armd) 
+ getVarCov(fm16.3, individual = "2")
+ intervals(fm16.3, which = "var-cov")
+ 
+
+```
+
+#### Model with a Diagonal Matrix D
+
+In this section, we consider model M16.4, which, similarly to model M16.3, is
+defined by (16.10), but for which we specify that
+$$
+D=
+\begin{pmatrix}
+d_{11} & 0\\
+0 & d_{22}
+\end{pmatrix}
+$$
+Thus, we assume that random intercepts $b_{0i}$ and random slopes $b_{1i}$ have different variances and are uncorrelated.
+
+```{r}
+fm16.4 <- update(fm16.3, random = list(subject = pdDiag(~time)), data = armd)
+#Confidence intervals for the parameters of model M16.4.
+intervals(fm16.4)
+
+#Testing a null hypothesis about the theta_D parameters for model M16.4. 
+#M16.4 (null) and M16.3 (alternative)
+anova(fm16.4, fm16.3) # H0: d12=0 
+```
+fm16.4 using the argument `random=pdDiag(~time)`. By specifying the argument, we imply a diagonal form of the variance-covariance matrix D of the random intercepts and slopes.
+
+The result is not statistically significant at the 5% significance level. It indicates that, by assuming a simpler, diagonal structure of the matrix D, we do not worsen the fit of the model. This conclusion is in agreement with the computed values of AIC: the value of 6,450.6 for model M16.3 is slightly larger than the value of 6,449.8 for model **M16.4**, which indicates a slightly better fit of the **latter** model.
+
+#### Model with a Diagonal Matrix D and a Constant Treatment Effect
+
+the mean structure of model M16.4 could be simpli- fied by removing the $TREAT_i *TIME_{it}$ interaction (see Panel R16.11). Toward this end, we specify model M16.5 by modifying (16.10) as follows:
+
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_{it} + \beta_3* TREAT_i + b_{0i} +b_{2i}*TIME_{it} +\epsilon_{it}$ (16.17)
+
+```{r}
+lm3.form <- formula(visual ~ visual0 + time + treat.f) # (12.9)
+fm16.5 <-update(fm16.4, lm3.form, data = armd)
+summary(fm16.5)
+summary(fm16.5)$tTable
+intervals(fm16.5, which = "var-cov")
+
+VarCorr(fm16.5)
+getVarCov(fm16.5, type = "conditional", individual = "2")
+(fm16.5cov <- getVarCov(fm16.5, type = "marginal", individual = "2"))
+cov2cor(fm16.5cov[[1]])
+
+#An Alternative Residual Variance Function: varIdent(·)
+(fm16.6 <- update(fm16.3, weights = varIdent(form = ~1 | time.f)))
+#(b) REML-based LR test for the variance function
+anova(fm16.3, fm16.6)
+
+#Testing Hypotheses About Random Effects
+#The values of Akaike’s Information Criterion for models M16.1–M16.5
+AIC(fm16.1, fm16.2, fm16.3, fm16.4)
+#the lowest value of the AIC is obtained for model M16.5, suggesting that the model provides the best overall fit to the data. This reflects the choices we made with respect to the random-effects structure in the process of arriving at the model.
+
+fm16.4ml <- update(fm16.4, method = "ML")
+fm16.5ml <- update(fm16.5, method = "ML")
+anova(fm16.4ml, fm16.5ml)
+#we consider several models for the ARMD data which assume homoscedasticity of the residual errors.
+
+#Test for Random Intercepts
+#The REML-based likelihood-ratio test for no random in- tercepts in model M16.1.
+vis.gls1a <- gls(lm2.form, data = armd)   # Null model
+(anova.res <- anova(vis.gls1a, fm16.1))  # Null vs. M16.1
+(anova.res[["p-value"]][2])/2
+
+#(b) Using the function exactRLRT() to simulate the null distribution 
+library(RLRsim)
+exactRLRT(fm16.1) # M16.1 (alternative)
+
+#Test for Random Slopes
+#The REML-based likelihood-ratio test for random slopes for model M16.7.
+fm16.7 <- update(fm16.4, weights = NULL, # Constant resid. variance 
+                   data = armd)
+(an.res <- anova(fm16.1, fm16.7))   #M16.1 (null) #M16.7 (alternative)
+(RLRT <- an.res[["L.Ratio"]][2]) # LR-test statistic
+
+.5 * pchisq(RLRT, 1, lower.tail = FALSE) + .5 * pchisq(RLRT, 2, lower.tail = FALSE)
+#(c) Using the function exactRLRT() to simulate the null distribution
+mAux <- # Auxiliary model with ...
+  update(fm16.1, random = ~0 + time|subject,   # ... random slopes only.
+         data = armd)
+
+exactRLRT(m = mAux,# Auxiliary model
+          m0 = fm16.1, # M16.1 (null)
+          mA = fm16.7)# M16.7 (alternative)
+
+#(d) Using the function simulate() to simulate the null distribution
+# vis.lme2.sim <- # M16.1 (null)
+#   simulate(fm16.1, m2 = fm16.7, nsim = 10000) # M16.7 (alternative) 
+# plot(vis.lme2.sim, df = c(1, 2), # Fig.16.12
+#      abline = c(0,1, lty=2))
+```
+
+#### Analysis Using the Function `lmer()`
+
+$VISUAL_{it} = \beta_0  + \beta_1 * VISUAL0_i + \beta_2* TIME_{it} + \beta_3* TREAT_i + \beta_4*TIME_{it}*TREAT_i+ b_{0i} +\epsilon_{it}$ (16.1)
+
+```{r}
+require(lme4)
+#Model M16.1 fitted using the function lmer()
+fm16.1mer <- lmer(visual ~ visual0 + time * treat.f + (1|subject), data = armd)
+print(fm16.1mer, corr = FALSE)
+
+#correlation matrix for betas
+vcovb <- vcov(fm16.1mer) # variance-covariance matrix
+corb <- cov2cor(vcovb)  # corr for betas
+nms <- abbreviate(names(fixef(fm16.1mer)), 5) 
+rownames(corb) <- nms
+corb
+
+#(a) Variance-components estimates
+VarCorr(fm16.1mer)
+(sgma <- as.data.frame(VarCorr(fm16.1mer))[2,"sdcor"]) # estimated sigma
+#(b) The marginal variance-covariance matrix
+A <- getME(fm16.1mer, "A")
+I.n <- Diagonal(ncol(A))
+V <- sgma^2 * (I.n + crossprod(A))
+str(getME(fm16.1mer, "flist")) #grouping factor
+V[3:6, 3:6]
+
+#Calculation of “naïve” p-values for the tests for fixed effects for model M16.1.
+#(a) P-values for the marginal-approach t-tests
+coefs <- coef(summary(fm16.1mer))
+ddf <- c(631, 231, 631, 231, 631) # Denominator df  **page 371**
+pT <- 2 * (1 - pt(abs(coefs[, "t value"]), ddf)) # p-value
+tTable <- cbind(coefs, ddf, pT)
+printCoefmat(tTable, P.values = TRUE, has.Pvalue = TRUE)
+
+#(b) P-values for the sequential-approach F-tests
+(dtaov <- anova(fm16.1mer))
+ddf1 <- ddf[-1] #ddf for intercept omitted
+within(dtaov, 
+       {
+         `Pr(>F)` <- pf(`F value`, Df, ddf1, lower.tail = FALSE)
+         denDf <- ddf1
+         })
+
+#Simulation-Based p-Values: The simulate.mer() Method
+#Simulations of the dependent variable based on the fitted form of model M16.1 using the simulate.mer() method.
+
+#(a) Refitting the model to the simulated data
+
+#merObject <- fm16.1mer # M16.1 fit
+#simD1 <- simulate(merObject, nsim = 1000) # Simulated y from M16.1
+#SimD1summ <- apply(simD1, 
+#                   2, # over columns
+#                   function(y){
+#                     auxFit <- refit(merObject, y)
+#                     summ <- summary(auxFit)
+#                     beta <- lme4::fixef(summ)
+#                     Sx <- getME(auxFit, "theta")
+#                     sgma <- nlmeU::sigma(auxFit)
+#                     list(beta = beta, ST = Sx, sigma = sgma) 
+#                     })
+
+
+
+#Model M16.7 fitted using the function lmer()
+fm16.2mer <- lmer(visual ~ visual0 + time + 
+                    treat.f + treat.f:time + 
+                    (1|subject) + (0 + time|subject), data = armd)
+summ <- summary(fm16.2mer) 
+coef(summ)
+
+#(b) Likelihood-ratio test for the treat.f:time interaction
+
+fm16.2aux <- update(fm16.2mer, . ~ . - treat.f:time)   #... interaction omitted
+anova(fm16.2aux, fm16.2mer) 
+
+```
+
+we fit model **M16.7** by employing the `lmer()` function and conduct the test for the interaction term. In particular, in Panel R16.26a, we note the use of two Z-terms, `(1|subject)` and `(0 + time|subject)`, in the `lmer()` formula (Sect. 15.3.1). By using the two terms, we essentially emulate a diagonal 2 × 2 matrix D (see Table 15.1).
+
+
+
+## Progressive Resistance Training (PRT) Trial
+subjects' characteristics: `prt.subjects`
+
+fiber measurement: `prt.fiber`
+
+merge subjects and fiber measurement: `prt`
+
+
+```{r}
+str(prt.subjects)
+str(prt.fiber)
+str(prt)
+
+#summary stats for subjects' characteristics
+with(prt.subjects, tapply(bmi,prt.f, summary))
+by(subset(prt.subjects, select = -id), prt.subjects$prt.f, summary)
+
+# number of fibers per type and occasion for the subject "5" and "335"
+fibL<-
+  with(prt,
+       tapply(spec.fo,
+              list(id = id, fiberF = fiber.f, occF = occ.f),
+              length))
+dimnms<- dimnames(fibL)
+names(dimnms)
+
+fibL["5", , ]
+
+fibL["335", , ]
+
+# mean value of spec.fo by fiber type and occasion for subject 5
+fibM<-
+  with(prt,
+       tapply(spec.fo,
+              list(id = id, fiberF = fiber.f, occF = occ.f),
+              mean))
+fibM["5", , ]
+
+#end at page 51
+
+#  (a) Preprocessing of the data (melting)
+
+#  (b) Aggregating data (casting)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+## Study of Instructional Improvement (SII)
+
+variable information page 25
+
+```{r}
+str(SIIdata)
+
+#examine the data hierarchy 
+dtId<-subset(SIIdata, select = c(schoolid, classid, childid))
+any(duplicated(dtId))
+require(nlme)
+names(gsummary(dtId, form = ~childid, inv = T))
+names(gsummary(dtId, form = ~classid, inv = T))
+names(gsummary(dtId, form = ~schoolid, inv = T))
+
+#school level variables
+(nms1<-names(gsummary(SIIdata, form = ~schoolid, inv = T)))
+
+#Class level variables
+nms2a<-names(gsummary(SIIdata, form = ~classid, inv = T))
+idx1<-match(nms1,nms2a)
+(nms2<-nms2a[-idx1])
+
+#pupil level variables
+nms3a<-names(gsummary(SIIdata, form = ~childid, inv = T))
+idx12<-match(c(nms1,nms2),nms3a)
+nms3a[-idx12]
+
+#The number of missing values for variables included in the SIIdata data frame  
+sapply(SIIdata, FUN = function(x) any(is.na(x)))
+sum(as.numeric(is.na(SIIdata$mathknow)))
+range(SIIdata$mathknow, na.rm = TRUE)
+
+
+#Extracting the information about the number of pupils per school
+(schlN <- xtabs(~schoolid, SIIdata)) # Number of pupils per school
+range(schlN)
+xtabs(~schlN)  # distribution of the number of pupils over schools
+
+# Computation of the mean value of pupils’ math scores for each school
+attach(SIIdata)
+mthgM <- by(cbind(mathgain, mathkind), schoolid, colMeans)
+head(mthgM, 10)
+detach(SIIdata)
+
+#  Constructing a data frame with summary data for schools
+# (a) Creating a data frame with the number of classes and children for each school
+library(reshape)
+idvars <- c("schoolid")
+mvars <- c("classid", "childid")
+dtm1 <- melt(SIIdata, id.vars = idvars, measure.vars = mvars)  
+names(cst1 <-cast(dtm1,
+                  fun.aggregate = function(el) length(unique(el))))
+names(cst1) <- c("schoolid", "clssn", "schlN")
+
+# (b) Creating a data frame with the school-specific means of selected variables
+mvars <- c("mathgain", "mathkind", "housepov")
+dtm2 <- melt(SIIdata, id.vars = idvars, measure.vars = mvars)
+names(cst2 <- cast(dtm2, fun.aggregate = mean))
+names(cst2) <- c("schoolid", "mthgMn", "mthkMn", "housepov")
+
+#(c) Merging the data frames created in parts (a) and (b) above
+schlDt <- merge(cst1, cst2, sort = FALSE)
+head(schlDt,15)
+rm(cst1, cst2)
+
+# Summary statistics for the school-specific mean values of housepov
+summary(schlDt$housepov)
+
+xyplot(mthgMn ~ housepov, 
+       schlDt, type = c("p", "smooth"), grid = TRUE) # Fig.3.8a
+xyplot(mthgMn ~ mthkMn, 
+       schlDt, type = c("p", "smooth"), grid = TRUE) # Fig.3.8b
+
+
+# Extracting the information about the number of pupils per class
+
+(clssN <- xtabs(~ classid, SIIdata))
+sum(clssN) # Total number of pupils
+range(clssN)
+(clssCnt <- xtabs(~clssN)) # Distribution of no. of pupils/classes
+sum(clssCnt) # Total number of classes
+```
+
+
+#### Model specification
+
+Model M18.6 is defined as follows:
+$$
+MATHGAIN_{sci}=\beta_0 + \beta_1*SES_{sci}+\beta_2*MINORITY_{sci} +\beta_{1,2}*SES_{sci}*MINORITY_{sci}
+$$
+$$
++\beta_{3,p1}* p1(MATHKIND_{sci})+\beta_{3,p2}* p2(MATHKIND_{sci})+\beta_{3,p3}* p3(MATHKIND_{sci})
+$$
+$$
++b_{0s}+b{0sc}+ \epsilon_{sci} \equiv \mu_{sci}+b_{0s}+b{0sc}+ \epsilon_{sci}
+$$
+the random-effects structure for a two-level LMM with nested effects. In particular, the nesting of grouping factors, i.e., `classid` within `schoolid`, is explicitly expressed using the crossing operator : (see Sect. 5.2.1) in the Z-term `(1|schoolid:classid)`, included in the model formula along with the `(1|schoolid)` term.
+
+```{r}
+library(lme4)
+
+fm18.6mer <- lmer(mathgain ~ ses + minority + poly(mathkind, 3) + 
+                    ses:minority + (1|schoolid) + 
+                    (1|schoolid:classid), # Syntax #1 (general)
+                  data = SIIdata, REML = FALSE) 
+summ <- summary(fm18.6mer)
+print(summ, corr = FALSE)
+```
+
+In the data frame SIIdata, the levels of the factor classid have been coded as explicitly nested within the levels of schoolid (Sect. 2.4.3). This approach is actually recommended in the case of representing factors with nested levels. Hence, it is possible to fit model M18.6 using a simpler syntax, namely, `(1|schoolid) + (1|classid)` for the random-effects structure (see syntax (2a) in Table 15.2). In particular, in the second syntax shown in Panel R18.17, the Z-term for the factor `classid`, `(1|classid)`, does not use the crossing operator `:` and, therefore, does not explicitly indicate the nesting. 
+
+```{r}
+update(fm18.6mer,mathgain ~ ses + minority + 
+         poly(mathkind, 3) + ses:minority +
+         (1|schoolid) + (1|classid))
+```
+
+Finally, the third form of the lmer()-function call, shown in Panel R18.17, uses the nonessential operator / (see Table 5.3) in the Z-term `(1|schoolid/classid)` to abbreviate the specification of the random-effects part of the `lmer()` model formula.
+
+```{r}
+update(fm18.6mer,mathgain ~ ses + minority + 
+         poly(mathkind, 3) + ses:minority +
+         (1|schoolid/classid))
+
+#Extracting information about the estimated fixed- and random- effects structure of model M18.6 from the mer-class model-fit object. 
+anova(fm18.6mer) # Approximate F-test statistics
+logLik(fm18.6mer)  #ML value
+unlist(VarCorr(fm18.6mer))
+as.data.frame(VarCorr(fm18.6mer))[3,"sdcor"]   #sigma
+
+#(a) Normal Q-Q plot of the raw class-level residuals
+rsd6 <- resid(fm18.6mer)
+qqnorm(rsd6)
+
+#(b) Normal Q-Q plot of predicted random effects
+rnf6mer <- ranef(fm18.6mer)     #Random effects
+rnf6qn <- plot(rnf6mer, grid = TRUE)# Q-Q plot for random effects
+update(rnf6qn[["schoolid:classid"]], # For classid (see Fig.18.9a)
+       ylab = c("Random effects for classes")) 
+update(rnf6qn[["schoolid"]], # For schoolid (see Fig.18.9b)
+       ylab = c("Random effects for schools"))
+
+
+```
+
+
+## Flemish Community Attainment-Targets (FCAT) Study
+
+```{r}
+#page 35
+str(fcat)
+
+#Investigation of the data grouping structure
+tab1 <- xtabs(~ id + target, data = fcat)   # id by target table
+
+all(tab1 > 0) # All counts > 0? 
+
+range(tab1) # Range of counts
+
+#(a) Summarizing scores for each child and attainment target
+scM <- with(fcat, tapply(scorec, list(id, target), mean))
+
+#(b) Histograms of scores for different attainment targets
+
+histogram(~scorec | target, data = fcat, breaks = NULL) # Fig.3.11
+
+```
+
+
+

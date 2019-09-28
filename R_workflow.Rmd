@@ -1,0 +1,551 @@
+---
+title: "R workflow"
+author: "Yazhuo Deng"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    number_sections: true  ## if you want number sections at each table header
+    theme: united
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_chunk$set(fig.width=3, fig.height=2) 
+```
+
+R Markdown: The Definitive Guide
+https://bookdown.org/yihui/rmarkdown/
+
+Tools for Reproducible Research
+http://kbroman.org/Tools4RR/
+
+```{r message=FALSE} 
+# do not convert strings to factors automatically
+options( stringsAsFactors=FALSE )
+
+# do not use scientific convention except for large numbers
+options( scipen=8 )
+
+#options(scipen = 999)  ## disable scientific notation 4.835312e-04 --> 0.0004835312
+#options(warn=-1, message =-1)
+library(tidyverse) 
+#> ✔ ggplot2 2.2.1.9000     ✔ purrr   0.2.4     
+#> ✔ tibble  1.4.2          ✔ dplyr   0.7.4     
+#> ✔ tidyr   0.8.0          ✔ stringr 1.3.0     
+#> ✔ readr   1.1.1          ✔ forcats 0.3.0
+library(readxl) #read excel
+library(stargazer) #nice and informative tables
+library(compareGroups) # nice table one
+library(summarytools) # summary table for exploratory analysis
+library(labelVector) # labeling variables
+```
+
+```{r message=FALSE}
+library(PoEdata)#for PoE datasets
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot. You can use `include=FALSE` to exclude everything in a chunk. If you only want to suppress messages, use `message=FALSE` instead. We can mask the result by using `results = FALSE`. Use command-shift-m to insert pipe operator `%>%`. 
+
+## Useful tricks
+
+```{r} 
+# setup subdirectory
+#setwd("./subfolder")
+#also see A summary of symbols used in paths below
+# https://stackoverflow.com/questions/37380961/moving-down-a-folder-in-working-directory
+
+## reorder variable
+#starwars data from dplyr
+starwars %>%
+  select(name, height, mass, gender, species) %>%
+  mutate(type = case_when(height > 200 | mass > 200 ~ 'large',
+                          species == 'Droid' ~ 'robot',
+                          TRUE ~ 'other'))
+
+
+#rename several variables
+#dplyr::rename(.data, NEW.NAME1 = old.name1, NEW.NAME2 = old.name2)
+
+
+## An 'if' statement takes the form:
+## if(logical boolean){function to perform if the boolean is TRUE}
+x <- 100000000
+
+if(x > 10000){
+  "x is a really big number"
+}
+
+if(x < 10000){
+  "x isn't that big"
+} ## Nothing happens here because x < 10000 evaluates to false
+
+## We can use else statements to deal with instances where the boolean
+## evaluates to FALSE
+
+## Note that using multiple if/else statements requires that you wrap the whole thing
+## in curly brackets, {}:
+
+x <- 1
+
+if(x > 10000){
+  "x is a really big number"
+  }  else{
+    "x isn't that big"
+  }
+
+#######################################################
+
+## Note about the modulus function: what it does is divides the number
+## in front of it by the number after it, and gives you the remainder.
+
+## It's really useful to use inside of loops because you can use it to
+## print the iteration you're on.
+
+## In other words, if you have a loop that has 100,000 iterations, 
+## maybe you want to keep tabs on how long it's taking and where it is,
+## but don't want to print every single number from 1 to 100,000.
+## Inserting this code into the loop will print only every 100th iteration:
+
+for(i in 1:500){
+  if((i %% 100) == 0){
+    print(i)
+  }
+}
+
+####################################################
+
+## For a loop that does 10,000 iterations:
+start <- proc.time()[3] ## this captures and stores the time before the loop starts
+holder <- c()
+
+for(i in 1:10000){
+  holder[i] <- rnorm(1, mean = 0, sd = 1) 
+  # here we are drawing one observation from a normal distribution
+  # with mean zero and standard deviation 1
+}
+
+end <- proc.time()[3]
+
+## How long did that take?
+
+loop10000 <- end - start
+loop10000
+
+## What if we had vectorized our code and drawn all 10,000 random numbers first?
+
+start <- proc.time()[3]
+draws <-  rnorm(10000, mean = 0, sd = 1)
+end <- proc.time()[3]
+
+vect10000 <- end - start
+
+loop10000
+vect10000
+
+## The vectorized code was way, way faster!
+
+####################################################
+
+## There's one other way, and it's a really cool R-hack.
+## When you write a function, you can store objects using
+## <<- instead of just <-
+## Using the double arrow stores the object to your workspace,
+## so that it's accessible after the function is complete
+
+debugging.example <- function(x){
+  
+  holder <- rbeta(1000, 1, 10)
+  holder <- sort(holder, decreasing = T)
+  holder <- matrix(holder[1:50], 25, 2)
+  # put the <<- here to store holder
+  holder <<- matrix(holder[1:50], 25, 2)
+  t(holder) %*% x
+  
+}
+
+#debugging.example(test.matrix) ## Now it works
+head(holder)
+
+# Another trick to debug functions is to store objects in it with
+# '<<-' instead of '<-'. If you only use '<-' then the only thing
+# left in your workspace after the function runs will be the output
+# from the final line of the function. Using '<<-' will force that
+# object into your workspace, even if it's not the last line in
+# the function
+
+####################################################
+# Note that with lists you can use lapply() or sapply()
+# lapply() will output your result as a list
+# sapply() will (usually) output your result as a vector
+####################################################
+
+```
+
+```{r eval=FALSE}
+## Debugging functions
+
+## The browser() function is super super helpful if you have a really
+## complicated function that has a bug in the code.
+
+## Now let's see how we could use the browser() function to debug.
+## Note: you can also put browser() functions into for/while loops
+
+
+debugging.example <- function(x){
+  
+  holder <- rbeta(1000, 1, 10)
+  browser()
+  
+  holder <- sort(holder, decreasing = T)
+  browser()
+  
+  holder <- matrix(holder[1:50], 25, 2)
+  browser()
+  
+  holder %*% x
+}
+
+test.matrix <- matrix(rnorm(100), 25, 4)
+debugging.example(test.matrix) 
+## this tells us that the error doesn't occur until after the 3rd browser() statement
+```
+
+## Parallel computing 
+
+http://yiqingxu.org/teaching/mathcamp2/slides_R_session_handout.pdf
+https://privefl.github.io/blog/a-guide-to-parallelism-in-r/
+https://ethen8181.github.io/Business-Analytics/R/efficient_looping/efficient_looping.html
+https://www.stat.colostate.edu//~scharfh/CSP_parallel/handouts/foreach_handout.html#fitting-glms-and-extracting-prediction-error
+
+```{r eval=FALSE}
+library(parallel)
+library(doParallel)
+library(foreach)
+
+#Starting a cluster
+numCores <- detectCores()
+numCores
+cl <- parallel::makeCluster(numCores-2)
+# register clusters
+doParallel::registerDoParallel(cl)
+
+## Inject the doRNG framework to above registered for each backend
+library("doRNG") # to set seeds
+registerDoRNG()
+
+#comb function from https://stackoverflow.com/questions/19791609/saving-multiple-outputs-of-foreach-dopar-loop
+comb <- function(x, ...) {
+  lapply(seq_along(x),
+    function(i) c(x[[i]], lapply(list(...), function(y) y[[i]])))
+}
+
+oper <- foreach(i=1:10, .combine='comb', .multicombine=TRUE,
+                .init=list(list(), list())) %dopar% {
+                  #two lists so initial two list()
+                  list(i+2, i+3)
+                  }
+
+oper1 <- oper[[1]]
+oper2 <- oper[[2]]
+
+#Close the cluster
+stopCluster(cl)
+```
+
+
+## Exploratory analysis
+
+```{r}
+#Introduction to summarytools
+#https://cran.r-project.org/web/packages/summarytools/vignettes/Introduction.html
+
+#install.packages('devtools')
+#library(devtools)
+#install_github('dcomtois/summarytools')
+
+#view(dfSummary(iris))    #open a new browser to view the summary
+#graph.magnif-> graph size
+print(dfSummary(tobacco, style = 'grid', plain.ascii = FALSE, graph.magnif = 4), 
+       method = 'render', headings = FALSE)
+
+#http://lutgw1.lunet.edu/usr/lib64/R/library/Hmisc/tests/examples.Rmd
+#http://hbiostat.org/R/Hmisc/examples.html
+library(Hmisc)
+d<-describe(tobacco) 
+html(d, size=90, scroll=F)
+```
+
+
+## Descriptive table one
+
+```{r}
+#compareGroups 4.0: Descriptives by groups
+#https://cran.r-project.org/web/packages/compareGroups/vignettes/compareGroups_vignette.html
+
+data(predimed)
+predimed$tmain <- with(predimed, Surv(toevent, event == "Yes"))
+Hmisc::label(predimed$tmain) <- "AMI, stroke, or CV Death"
+
+# https://cran.r-project.org/web/packages/labelVector/vignettes/labelVector.html
+labelVector::get_label(predimed)
+
+#set label
+x <- 1:10
+x <- set_label(x, "some integers")
+x
+
+#To remove the variable toevent and event from the analysis:
+compareGroups(group ~ . - toevent - event, data = predimed)
+```
+
+No filters have been used (e.g., selecting only treated patients); therefore, the selection column lists **ALL** (for all variables).
+
+```{r}
+#To perform the analysis in a subset of participants (e.g., “female” participants):
+compareGroups(group ~ age + smoke + waist + hormo, data = predimed, 
+    subset = sex == "Female")
+
+#To subset specific variable/s (e.g., hormo and waist):
+compareGroups(group ~ age + sex + smoke + waist + hormo, data = predimed, 
+    selec = list(hormo = sex == "Female", waist = waist > 20))
+
+#Combinations are also allowed, e.g.:
+compareGroups(group ~ age + smoke + waist + hormo, data = predimed, 
+    selec = list(waist = !is.na(hormo)), subset = sex == "Female")
+
+#A variable can appear twice in the formula, e.g.:  (NOT SHOW)
+
+#To change default options, e.g., “waist” used as non-normal distributed:
+compareGroups(group ~ age + smoke + waist + hormo, data = predimed, 
+    method = c(waist = 2))
+
+#If the method argument is stated as NA for a variable, then a Shapiro-Wilk test for normality is used to decide if the variable is normal or non-normal distributed. To change the significance threshold:
+compareGroups(group ~ age + smoke + waist + hormo, data = predimed, 
+    method = c(waist = NA), alpha = 0.01)
+#Shapiro-Wilk test, stating the cutpoint at 0.01 level
+#1: forces analysis as normal-distributed
+#2: forces analysis as continuous non-normal
+#3: forces analysis as categorical
+#NA: performs a Shapiro-Wilks test to decide between normal or non-normal
+
+#All non factor variables are considered as continuous. Exception is made (by default) for those that have fewer than 5 different values. 
+
+#The object from compareGroups can later be updated. For example:
+res <- compareGroups(group ~ age + sex + smoke + waist + hormo, 
+    data = predimed)
+res <- update(res, . ~ . - sex + bmi + toevent, subset = sex == 
+    "Female", method = c(waist = 2, tovent = 2), selec = list(bmi = !is.na(hormo)))
+res
+
+#the Odds Ratio (OR) can be printed in the final table. If the response variable is time-to-event (see Section 3.1), the Hazard Ratio (HR) can be printed instead.
+res2 <- compareGroups(htn ~ age + sex + bmi + smoke, data = predimed, 
+    ref = c(smoke = 1, sex = 2))
+createTable(res2, show.ratio = TRUE)
+
+#The createTable function, applied to an object of compareGroups class, returns tables with descriptives that can be displayed on-screen or exported to CSV, LaTeX, HTML, Word or Excel.
+res <- compareGroups(group ~ age + sex + smoke + waist + hormo, 
+    data = predimed, selec = list(hormo = sex == "Female"))
+restab <- createTable(res)
+#the option “descr” prints descriptive tables.
+#digits: The number of digits that appear in the results can be changed
+print(restab, which.table = "descr")
+
+#show.all: If show.all argument is set to TRUE a column is displayed with descriptives for all data:
+createTable(res, show.all = TRUE)
+
+#Tables made with the same response variable can be combined by row:
+restab1 <- createTable(compareGroups(group ~ age + sex, data = predimed))
+restab2 <- createTable(compareGroups(group ~ bmi + smoke, data = predimed))
+rbind(`Non-modifiable risk factors` = restab1, `Modifiable risk factors` = restab2)
+
+#Columns from tables built with the same explanatory and response variables but done with a different subset (i.e. “Male” and “Female”, strata) can be combined:
+
+# first build the table with descriptives by groups:
+# include.miss = T shows missing value category 
+res <- compareGroups(group ~ . - sex, include.miss = T, predimed)
+restab <- createTable(res, hide.no = "no")
+# and then apply the strataTable function on the table:
+strataTable(restab, "sex")
+
+export2md(strataTable(restab, "sex"), size = 8)
+
+#Tables can be exported to CSV, HTML, LaTeX, PDF, Markdown, Word or Excel
+#export2csv(restab, file='table1.csv'), exports to CSV format
+#export2html(restab, file='table1.html'), exports to HTML format
+#export2latex(restab, file='table1.tex'), exports to LaTeX format (to be included in Swaeave documents R chunks)
+#export2pdf(restab, file='table1.pdf'), exports to PDF format
+#export2md(restab, file='table1.md'), to be included inside Markdown documents R chunks
+#export2word(restab, file='table1.docx'), exports to Word format
+#export2xls(restab, file='table1.xlsx'), exports to Excel format
+
+```
+
+
+## Reporting and handling missing data
+
+A new function has been implemented in the compareGroups package, which is called missingTable. This function applies to both compareGroups and createTable class objects. This last option is useful when the table is already created. To illustrate it, we will use the REGICOR data set, comparing missing rates of all variables by year:
+
+```{r}
+# from a compareGroups object
+data(regicor)
+res <- compareGroups(year ~ . - id, regicor)
+missingTable(res)
+```
+
+```{r eval=FALSE}
+#summarize missingness
+# the funcation counts the # of missing value for each variable
+propmiss <- function(dataframe) {
+m <- sapply(dataframe, function(x) {
+data.frame(
+nmiss=sum(is.na(x)), 
+n=length(x), 
+propmiss=sum(is.na(x))/length(x)
+		)
+	})
+d <- data.frame(t(m))
+d <- sapply(d, unlist)
+d <- as.data.frame(d)
+d$variable <- row.names(d)
+	row.names(d) <- NULL
+d <- cbind(d[ncol(d)],d[-ncol(d)])
+return(d[order(d$propmiss), ])
+}
+
+
+#replace NA to mean and mode
+Mode<-function(x,na.rm){
+    xtab <- table(x)
+    xmode <- names(which(xtab == max(xtab)))
+    if (length(xmode) > 1) xmode <- ">1 mode"
+    return(xmode)
+}
+
+df_test
+
+for (var in 1:ncol(df_test)) {
+    if (class(df_test[,var])=="numeric") {
+       df_test[is.na(df_test[,var]),var] <- mean(df_test[,var], na.rm = TRUE)
+    } else if (class(df_test[,var]) %in% c("character", "factor")) {
+        df_test[is.na(df_test[,var]),var] <- Mode(df_test[,var], na.rm = TRUE)
+    }
+ }
+
+ac<-df_test
+```
+
+## Creating regression output table and export -> html -> excel
+
+```{r results=T}
+#load package with the data
+#install.packages("devtools")  # if not already installed
+# library(devtools)
+# install_git("https://github.com/ccolonescu/PoEdata")
+
+#load data 
+data("cps4_small", package="PoEdata")
+names(cps4_small)
+
+#run the model
+dnosouth <- cps4_small[which(cps4_small$south==0),]#no south
+dsouth <- cps4_small[which(cps4_small$south==1),] #south
+mod5ns <- lm(wage~educ+black*female, data=dnosouth)
+mod5s <- lm(wage~educ+black*female, data=dsouth)
+mod6 <- lm(wage~educ+black*female+south/(educ+black*female),
+                       data=cps4_small)
+
+#Stargazer cheat sheets
+#https://www.jakeruss.com/cheatsheets/stargazer/
+
+print(stargazer(mod6, mod5ns, mod5s, header=FALSE, 
+  type="text",
+  title="Model comparison, 'wage' equation",
+  keep.stat="n",digits=2, single.row=TRUE,
+  intercept.bottom=FALSE))
+```
+
+```{r results=F}
+#output the results to html, we create a HTML file that can be easily copied/pasted into Word/Excel.
+#HTML output may look like meaningless code in the console. use results = F to mask them.
+# add "'" in front of the cell contents in excel to avoid function
+xxx<-stargazer(mod6, mod5ns, mod5s, header=FALSE, 
+  type="html",
+  title="Model comparison, 'wage' equation",
+  keep.stat="n",digits=2, single.row=TRUE,
+  intercept.bottom=FALSE, out= "xxx.html")
+
+library(rio)
+#export(as.data.frame(xxx), "xxx.csv")
+```
+
+```{r}
+#alternative regression table
+library(texreg)
+library(estimatr) #robust SE for a regression with heteroskedasticity
+cars1 <- lm_robust(mpg ~ disp, se_type = 'stata', mtcars) 
+cars2 <- lm_robust(mpg ~ wt, se_type = 'stata', mtcars)
+cars3 <- lm_robust(mpg ~ disp + wt, se_type = 'stata', mtcars)
+screenreg(list(cars1, cars2, cars3), include.ci = FALSE,
+       caption = 'Predicting Fuel Economy', 
+       custom.coef.names = c('Intercept',
+                             'Displacement (cubic inches)',
+                             'Weight (1000lb)'),
+       custom.note = 'Robust Standard Errors')
+# use texreg() to knit latex, htmlreg() if knitting to html, and screenreg() if previewing in RStudio
+```
+
+
+## JJHmisc package (TODO)
+
+```{r}
+#library(devtools)
+#install_github("johnjosephhorton/JJHmisc")
+library(JJHmisc)
+library(help = JJHmisc)
+lsf.str("package:JJHmisc")
+
+#read the source code of AddTableNote function
+JJHmisc:::AddTableNote 
+```
+
+## list of some useful R functions
+
+```{r  include=TRUE, fig.align="center", fig.cap=c("Useful functions")}
+knitr::include_graphics("rFunctionsList.pdf") 
+``` 
+https://tfse.mikewk.com
+
+
+
+## TODO
+http://www.stephenpettigrew.com/r/
+
+https://cran.r-project.org/web/packages/apaTables/vignettes/apaTables.html
+
+papaja: Reproducible APA manuscripts with R Markdown
+
+https://crsh.github.io/papaja_man/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
