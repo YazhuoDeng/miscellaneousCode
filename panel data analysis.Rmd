@@ -1,0 +1,3077 @@
+---
+title: "Time series and panel data analysis"
+author: "Yazhuo Deng"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    number_sections: true  ## if you want number sections at each table header
+    theme: united
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    latex_engine: xelatex
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Time series analysis
+
+### Estimator properties and approaches to time series
+
+```{r}
+### VISUALIZING DATA###
+
+
+##REQUIRED DATA FILE: PESenergy.csv. Available from: http://dx.doi.org/10.7910/DVN/ARKOTI
+
+#clean up
+rm(list=ls())
+
+##SECTION 3.1: UNIVARIATE GRAPHS IN THE base PACKAGE##
+#load energy policy coverage data
+pres.energy<-read.csv("PESenergy.csv")
+#pres.energy<-read.csv("http://j.mp/PRESenergy")
+
+#draw a histogram of TV coverage
+hist(pres.energy$Energy,xlab="Television Stories",main="")
+abline(h=0,col='gray60')
+box()
+
+#box-and-whisker plot of TV coverage
+boxplot(pres.energy$Energy,ylab="Television Stories")
+
+#box-and-whisker plots before and after Nixon speech
+pres.energy$post.nixon<-c(rep(0,58),rep(1,122))
+boxplot(pres.energy$Energy~pres.energy$post.nixon,
+        axes=F,ylab="Television Stories")
+axis(1,at=c(1,2),labels=c('Before Nov. 1973','After Nov. 1973'))
+axis(2)
+box()
+
+#SCATTERPLOT#
+#quick and dirty
+plot(y=pres.energy$Energy,x=pres.energy$oilc)
+
+#beautified
+plot(y=pres.energy$Energy,x=pres.energy$oilc,
+     xlab="Oil Price",ylab="Energy Coverage")
+abline(lm(Energy~oilc,data=pres.energy))
+
+#SECTION 3.2.1: LINE GRAPHS WITH plot#
+#line plot of energy coverage by month
+plot(x=pres.energy$Energy,type="l",axes=F,
+     xlab='Month', ylab='Television Stories on Energy')
+axis(1,at=c(1,37,73,109,145),
+     labels=c('Jan. 1969','Jan. 1972','Jan. 1975','Jan. 1978','Jan. 1981'),
+     cex.axis=.7)
+axis(2)
+abline(h=0,col='gray60')
+box()
+
+#alternative version of the line plot of monthly energy coverage
+pres.energy$Time<-1:180
+plot(y=pres.energy$Energy,x=pres.energy$Time,type="l")
+
+#line plot of oil price per barrel by month
+plot(x=pres.energy$oilc,type='l',axes=F,xlab='Month',ylab='Cost of Oil')
+axis(1,at=c(1,37,73,109,145),
+     labels=c('Jan. 1969','Jan. 1972','Jan. 1975','Jan. 1978','Jan. 1981'),
+     cex.axis=.7)
+axis(2)
+box()
+
+
+######################################################################
+# simulate trending series
+
+#set the sample size
+n <- 300
+
+#create a time index
+t <- c(1:300)
+
+#generate a disturbance term for x
+delta <- rnorm(n)
+
+#generate the variable x
+x <- .1*t + delta
+
+#generate a disturbance term for y
+epsilon <- rnorm(n)
+
+#generate the variable y
+y <- .5*t + epsilon
+
+#regress y on x
+model.1 <- lm(y~x)
+
+#view the results
+summary(model.1)
+
+#### quick and dirty way to get some confidence intervals 
+#install.packages("MBESS") #installation, only necessary once per machine
+library(MBESS)
+
+#the following command expects: 
+#coefficient estimate, standard error, sample size, number of predictors
+my.se<-summary(model.1)$sigma*sqrt(summary(model.1)$cov.unscaled[2,2])
+my.se
+MBESS::ci.reg.coef(b.j=model.1$coefficients[2], SE.b.j=my.se, N=300, p=1)
+
+
+######################################################################
+#differencing series
+
+#set the sample size
+n <- 300
+
+#create a time index
+t <- c(1:300)
+
+#generate a disturbance term for x
+delta <- rnorm(n)
+
+#generate the variable x
+x <- .1*t + delta
+
+#generate a disturbance term for y
+epsilon <- rnorm(n)
+
+#generate the variable y
+y <- .5*t + .5*x + epsilon
+
+#regress y on x
+model.1 <- lm(y~x)
+summary(model.1)
+
+#Install a package
+#install.packages("timeSeries")
+library(timeSeries)
+
+#difference the series
+d.x <- diff(x)
+d.y <- diff(y)
+d.t <- c(1:299)
+
+#plot the series
+plot(x=d.t,y=d.x,type='l')
+lines(x=d.t,y=d.y,col='blue',lty=2)
+
+#regress y on x
+model.2 <- lm(d.y~d.x)
+summary(model.2)
+
+######################################################################
+
+```
+
+### ARIMA Models
+```{r  include=TRUE, fig.align="center", fig.cap=c("ARIMA")}
+knitr::include_graphics("Table6-1.pdf") 
+
+```
+
+```{r}
+###CHAPTER 9: TIME SERIES ANALYSIS###
+###POLITICAL ANALYSIS USING R, BY JAMIE MONOGAN###
+
+##REQUIRED DATA FILE: PESenergy.csv 
+
+#clean up
+rm(list=ls())
+
+##SECTION 9.1: THE BOX-JENKINS METHOD##
+#load data
+#pres.energy<-read.csv("http://j.mp/PRESenergy")
+pres.energy<-read.csv("PESenergy.csv")
+
+#autocorrelation and partial autocorrelation functions
+acf(pres.energy$Energy,lag.max=24)
+pacf(pres.energy$Energy,lag.max=24)
+
+#estimate ARIMA model
+ar1.mod<-arima(pres.energy$Energy,order=c(1,0,0))
+ar1.mod
+
+#diagnose model
+tsdiag(ar1.mod,24)
+
+#autocorrelation and partial autocorrelation functions on residuals
+acf(ar1.mod$residuals,lag.max=24)
+pacf(ar1.mod$residuals,lag.max=24)
+
+#Ljung-Box Q test
+Box.test(ar1.mod$residuals,lag=24,type='Ljung-Box')
+
+######################################################################
+#SECTION 9.1.1: TRANSFER FUNCTIONS VERSUS STATIC MODELS#
+#Energy coverage examples showing static regression and intervention analysis
+#static regression model with ARIMA error process
+predictors<-as.matrix(subset(pres.energy,
+                      select=c(rmn1173,grf0175,grf575,jec477,
+                               jec1177,jec479,embargo,hostages,
+                               oilc,Approval,Unemploy)))
+static.mod<-stats::arima(pres.energy$Energy, 
+                  order=c(1,0,0), 
+                  xreg=predictors)
+static.mod
+
+#load package
+#install.packages('TSA')
+library(TSA)
+
+#estimate transfer function
+dynamic.mod<-TSA::arimax(pres.energy$Energy,order=c(1,0,0),
+                    xreg=predictors[,-1],
+                    xtransf=predictors[,1],
+                    transfer=list(c(1,0)))
+dynamic.mod
+
+#plot the dynamic effect of the intervention over the raw series
+months<-c(1:180)
+y.pred<-dynamic.mod$coef[2:12]%*%c(1,predictors[58,-1])+
+  160.6241*predictors[,1]+160.6241*(.6087^(months-59))*as.numeric(months>59)
+plot(y=pres.energy$Energy,x=months,
+     xlab="Month",ylab="Energy Policy Stories",
+     type="l",axes=F)
+axis(1,at=c(1,37,73,109,145),
+     labels=c('Jan. 1969','Jan. 1972','Jan. 1975','Jan. 1978','Jan. 1981'))
+axis(2)
+box()     
+lines(y=y.pred,x=months,lty=2,col='blue',lwd=2)
+
+#plot predicted values of the series with a line, with true values as points
+months<-c(1:180)
+full.pred<-pres.energy$Energy-dynamic.mod$residuals
+plot(y=full.pred,x=months,
+     xlab="Month",ylab="Energy Policy Stories",
+     type="l",ylim=c(0,225),axes=F)
+points(y=pres.energy$Energy,x=months,pch=20)
+legend(x=0,y=200,legend=c("Predicted","True"),pch=c(NA,20),lty=c(1,NA))
+axis(1,at=c(1,37,73,109,145),
+     labels=c('Jan. 1969','Jan. 1972','Jan. 1975','Jan. 1978','Jan. 1981'))
+axis(2)
+box()  
+
+######################################################################
+
+
+#### ESTIMATING A SEASONAL ARIMA MODEL ###
+#front matter
+rm(list=ls())
+library(TSA)
+
+#load data
+data(co2)
+#write.csv(co2,"co2.csv")
+plot(co2)
+
+#first difference model
+co2.1 <- arima(co2, order=c(0,1,0))
+plot(co2.1$residuals)
+
+acf(co2.1$residuals,24)
+pacf(co2.1$residuals,24)
+
+#seasonal difference model
+co2.2 <- TSA::arima(co2, order=c(0,1,0), 
+                    seasonal=list(order=c(0,1,0), period=12))
+plot(co2.2$residuals)
+
+acf(co2.2$residuals,24)
+pacf(co2.2$residuals,24)
+
+#Moving Average Components for year and season
+co2.3 <- TSA::arima(co2, order=c(0,1,1), 
+               seasonal=list(order=c(0,1,1), period=12))
+
+acf(co2.3$residuals,24)
+pacf(co2.3$residuals,24)
+Box.test(co2.3$residuals,24,"Ljung-Box")
+
+co2.3
+######################################################################
+
+```
+
+### Intervention Analysis and Forecasting
+
+```{r}
+### FORECASTING WITH AN ARIMA MODEL ###
+#front matter
+rm(list=ls())
+library(foreign)
+library(TSA)
+
+#Input Data
+#data <- read.dta(file.choose())
+data <- read.dta("HOME2X7.DTA")
+#data<-read.dta("//spia.uga.edu/faculty_pages/monogan/teaching/ts/HOME2X7.DTA")
+
+#Bind Two or More Time Series
+data <- ts.union(data)
+
+#Diagnose series 2
+#Auto- and Cross- Covariance and -Correlation Function Estimation
+acf(data$z2,20)
+pacf(data$z2,20)
+
+mod.z2 <- TSA::arima(data$z2, order=c(1,0,0))
+
+acf(mod.z2$residuals,20)
+pacf(mod.z2$residuals,20)
+#Box-Pierce and Ljung-Box Tests
+Box.test(mod.z2$residuals,20,"Ljung-Box")
+
+#Projections with mod.z2
+plot(mod.z2, n.ahead=50, type='l')
+
+######################################################################
+#Bush approval example in R
+
+#load data & view series
+#bush <- read.dta(file.choose())#BUSHJOB.DTA
+bush <- read.dta("BUSHJOB.DTA")
+#bush <- read.dta("//spia.uga.edu/faculty_pages/monogan/teaching/ts/BUSHJOB.DTA")
+plot(y=bush$approve, x=bush$t, type='l')
+
+#identify arima process
+acf(bush$approve,20)
+pacf(bush$approve,20)
+
+#Estimate AR(1) model. Using a bit of theory to justify AR(1).
+mod.1 <- arima(bush$approve, order=c(1,0,0))
+mod.1
+
+#diagnose arima model
+acf(mod.1$residuals,20)
+pacf(mod.1$residuals,20)
+Box.test(mod.1$residuals,20,"Ljung-Box")
+
+#estimate intervention analysis for september 11 (remember to start with a pulse)
+mod.2b <- arimax(bush$approve, order=c(1,0,0), 
+                 xtransf=bush$s11, transfer=list(c(1,0)))
+mod.2b
+#Notes: the second parameter is the numerator term. 
+#If 0 only, then concurrent effect only. 
+#The first parameter affects the denominator. 
+#c(0,0) replicates the effect of just doing "xreg"
+#Our parameter estimates look good, 
+#no need to drop delta or switch to a step function.
+
+#Graph the intervention model
+y.pred <- 56.0327 + 27.6660*bush$s11 + 27.6660*(0.8984^(bush$t-9))*as.numeric(bush$t>9)
+plot(y=bush$approve, x=bush$t, type='l')
+lines(y=y.pred, x=bush$t, lty=2)
+
+#We also can combine the AR(1) and intervention features into forecasts. 
+#Do this SECOND, though:
+full.pred<-bush$approve-mod.2b$residuals
+plot(y=bush$approve, x=bush$t)
+lines(y=full.pred, x=bush$t)
+
+#expand into the onset of the war in Iraq
+#note: the upward movement actually starts to happen one lag out
+#simplest specification:
+mod.3 <- arimax(bush$approve, order=c(1,0,0), 
+                xtransf=cbind(bush$s11,bush$iraq), 
+                transfer=list(c(1,0),c(1,0)))
+mod.3
+
+#Graph the new intervention model
+y.pred <- 56.1190+ 26.0329*bush$s11 + 
+  26.0329*(0.9025^(bush$t-9))*as.numeric(bush$t>9) + 
+  3.9335*bush$iraq + 3.9335*(0.7592^(bush$t-27))*as.numeric(bush$t>27)
+plot(y=bush$approve, x=bush$t, type='l')
+lines(y=y.pred, x=bush$t, lty=2)
+
+######################################################################
+
+```
+
+### Transfer Functions
+
+```{r}
+#exploring the 'ccf' function. Also, how to lag variables in R.
+#clean up
+rm(list=ls())
+
+#The 'ccf' function allows a simple way to get cross-correlations.
+#Oddly, 'x' refers to the presumed endogenous variable 
+#and 'y' refers to the presumed exogenous variable.
+#This is opposite of what is usually expected.
+#Here is a Monte Carlo simulation describing how this works.
+a<-rnorm(1000)
+b<-rep(NA,1000)
+b[1]<-0
+for (i in 2:1000) b[i]<-.5*a[i-1]+rnorm(1)
+
+#view our simulations
+plot(a,type='l')
+lines(b,lty=2,col='red')
+
+#By the truth, lags of a should predict values of b.
+#To get what we normally want from a CCF, 
+#x is your endogenous variable and y is your exogenous
+ccf(x=a,y=b,lag.max=5,
+    xlab="Negative means x precedes y. Positive means y precedes x.")
+ccf(x=b,y=a,lag.max=5,
+    xlab="Negative means x precedes y. Positive means y precedes x.")
+
+###ADDITIONAL ILLUSTRATION###
+#Let's look at some cross-correlations of Greek tourism and terrorist attacks.
+#We'll compare 'ccf' to Pearson correlation computation.
+
+#Load data
+#https://spia.uga.edu/faculty_pages/monogan/teaching/ts/italy.csv
+data <- read.csv('italy.csv')
+
+#View data
+plot(data$GRSHARE, type='l')
+plot(data$ATTKGR, type="l")
+
+#CCF of unfiltered variables
+ccf.output<-ccf(y=data$ATTKGR, x=data$GRSHARE, 12,
+                xlab="Negative means x precedes y. Positive means y precedes x."); ccf.output
+tour<-ts(data$GRSHARE)
+terr<-ts(data$ATTKGR)
+l.terr<-lag(terr,-1)
+l2.terr<-lag(terr,-2)
+l.tour<-lag(tour,-1)
+l2.tour<-lag(tour,-2)
+data.2<-na.omit(as.data.frame(ts.union(tour,terr,l.terr,l2.terr,l.tour,l2.tour)))
+
+#compare
+cor(data.2$tour,data.2$l.terr);ccf.output[1]
+cor(data.2$tour,data.2$l2.terr);ccf.output[2]
+cor(data.2$terr,data.2$l.tour);ccf.output[-1]
+cor(data.2$terr,data.2$l2.tour);ccf.output[-2]
+
+###################################################################
+
+##TRANSFER FUNCTION EXAMPLE--right track example##
+#Is the country on the right track?
+
+#data<-read.csv(file.choose(), header=T) #RIGHTTRK.csv
+data<-read.csv("RIGHTTRK.csv",header=T)
+
+#view the data
+plot(y=data$righttrk, x=data$time, type='l')
+par(new=T)
+plot(y=data$Employ, x=data$time, 
+     type='l',lty=2, xlab="", ylab="",axes=F)
+axis(4)
+
+#identify ARIMA models
+ccf(y=data$Employ, x=data$righttrk,20,
+    xlab="Negative means x precedes y. Positive means y precedes x.")
+acf(data$Employ,20)
+pacf(data$Employ,20)
+acf(data$righttrk,20)
+pacf(data$righttrk,20)
+
+#estimate ARIMA models
+mod.righttrk <- arima(data$righttrk, order=c(1,0,0)); mod.righttrk
+mod.Employ <- arima(data$Employ, order=c(1,0,0)); mod.Employ
+
+#diagnose ARIMA models
+acf(mod.righttrk$residuals, 26)
+pacf(mod.righttrk$residuals, 26)
+Box.test(mod.righttrk$residuals, 26, "Ljung-Box")
+
+acf(mod.Employ$residuals, 26)
+pacf(mod.Employ$residuals, 26)
+Box.test(mod.Employ$residuals, 26, "Ljung-Box")
+
+
+#identify a transfer function
+ccf(y=mod.Employ$residuals, x=mod.righttrk$residuals,20,
+    xlab="Negative means x precedes y. Positive means y precedes x.")
+
+#Perhaps an effect at lag 8 of employment onto right track?
+employ<-ts(data$Employ)
+l8.employ<-lag(employ,-8)
+track<-ts(data$righttrk)
+data.2<-na.omit(as.data.frame(ts.union(employ,l8.employ,track)))
+head(data.2)
+tf.1 <- arimax(data.2$track, order=c(1,0,0), 
+               xtransf=data.2$l8.employ, transfer=list(c(1,0)))
+tf.1
+tf.2 <- arimax(data.2$track, order=c(1,0,0), 
+               xtransf=data.2$l8.employ, transfer=list(c(1,1)))
+tf.2
+tf.3 <- arimax(data.2$track, order=c(1,0,0), 
+               xtransf=data.2$l8.employ, transfer=list(c(0,1)))
+tf.3
+
+#Diagnose our results from the 8-lag model
+acf(tf.3$residuals[-1],26)
+pacf(tf.3$residuals[-1],26)
+Box.test(tf.3$residuals[-1], 26, "Ljung-Box")
+
+ccf(y=mod.Employ$residuals[-(1:8)], x=tf.3$residuals[-1], 20,
+    xlab="Negative means x precedes y. Positive means y precedes x.")
+############################################################
+
+```
+
+### Regression Models for Dynamic Causation
+
+```{r}
+#front matter
+rm(list=ls())
+#install.packages("lmtest")
+#install.packages("dlnm")
+library(lmtest)
+library(dlnm)
+library(foreign)
+library(orcutt) 
+
+
+#load data and create lag structure
+bush<-read.dta("BUSHJOB.DTA")
+
+t.s11<-ts(bush$s11)
+t.iraq<-ts(bush$iraq)
+t.approve<-ts(bush$approve)
+lag.approve<-lag(t.approve,-1)
+
+bush.2<-ts.union(t.s11,t.iraq,t.approve,lag.approve)
+
+#run OLS models with and without a lagged DV (static and Koyck)
+mod.no.lag<-lm(approve~s11+iraq,data=bush)
+summary(mod.no.lag)
+mod.lag<-lm(t.approve~lag.approve+t.s11+t.iraq,data=bush.2)
+summary(mod.lag)
+
+#run Durbin-Watson and Breusch-Godfried tests
+dwtest(mod.no.lag)
+bgtest(mod.no.lag)
+bgtest(mod.lag)
+
+#run Cochrane-Orcutt
+mod.fgls <- cochrane.orcutt(mod.no.lag)
+summary(mod.fgls)
+
+#The results differ. In this case, 
+#I'd say that pulse inputs probably require an LDV 
+#for the full effect to enter the model.
+
+####DYNAMICS####
+#Unrestricted distributed lag model
+lag.x<-lag(t.s11,-1)
+lag2.x<-lag(t.s11,-2)
+lag3.x<-lag(t.s11,-3)
+lag4.x<-lag(t.s11,-4)
+lag5.x<-lag(t.s11,-5)
+bush.3<-ts.union(t.s11,t.iraq,t.approve,lag.approve,
+                 lag.x,lag2.x,lag3.x,lag4.x,lag5.x)
+
+mod.unrestricted <-lm(t.approve~t.s11+lag.x+lag2.x+lag3.x+
+                        lag4.x+lag5.x,data=bush.3)
+summary(mod.unrestricted)
+mod.koyck<-lm(t.approve~lag.approve+t.s11,data=bush.2)
+summary(mod.koyck)
+
+#Comparing coefficients
+unrestricted<-mod.unrestricted$coef[-1]
+koyck<-c(24.0644,24.0644*.9296,24.0644*.9296^2,
+         24.0644*.9296^3,24.0644*.9296^4,24.0644*.9296^5)
+
+plot(y=unrestricted,x=c(0:5),ylim=c(0,28),type='h',
+     col='blue',main="Comparing Effects:Unrestricted in Blue")
+par(new=T)
+plot(y=koyck,x=c(0:5+.1),ylim=c(0,28),xlim=c(0,5),
+     xlab="",ylab="",axes=F,type='h')
+abline(h=0, col='gray60')
+
+#Estimate an Almon Model
+basis.s11<-crossbasis(bush$s11, vartype="poly", vardegree=2)
+basis.t<-crossbasis(bush$t, vartype="poly", vardegree=2)
+mod.almon<-lm(approve~basis.s11+iraq,data=bush)
+summary(mod.almon)
+mod.almon.2<-lm(approve~basis.t+s11+iraq,data=bush)
+summary(mod.almon.2)
+############################################################
+
+```
+
+
+### Feasible GLS and Additional Lag Structures
+
+```{r}
+##MONTE CARLO CODE##
+#What if we have serial correlation and use an LDV?
+#How does the Koyck model fare in recovering the truth?
+rm(list=ls())
+library(TSA)
+library(orcutt)
+set.seed(10062010)
+
+T<-500
+nu<-rnorm(T+50)
+d<-rnorm(T+50)
+
+x0 <- rep(NA,T+50)
+y0 <- rep(NA,T+50)
+e0 <- rep(NA,T+50)
+x0[1] <- d[1]
+y0[1]<- e0[1] <- nu[1]
+
+
+for(t in 2:(T+50)){
+	x0[t]<- .5*x0[t-1] + d[t]
+	e0[t]<- .1*e0[t-1] + nu[t]
+	y0[t]<- .8*y0[t-1] + .3*x0[t] +e0[t]
+	}
+
+
+y<-ts(y0[51:(T+50)])
+x<-ts(x0[51:(T+50)])
+time<-c(1:T)
+plot(y=y, x=time,type='l',xlab='time',ylab='y')
+lines(y=x, x=time, lty=2, col='blue')
+axis(4)
+mtext("x", side=4)
+
+data2 <- ts.union(y, l.y=lag(y, -1), x)
+mod.1 <- lm(y~l.y+x, data=data2); summary(mod.1)
+
+
+###Just autocorrelation with LDV v. FGLS###
+rm(list=ls())
+T<-500
+nu<-rnorm(T+50)
+d<-rnorm(T+50)
+
+x0 <- rep(NA,T+50)
+y0 <- rep(NA,T+50)
+e0 <- rep(NA,T+50)
+x0[1] <- d[1]
+y0[1]<- e0[1] <- nu[1]
+
+
+for(t in 2:(T+50)){
+	x0[t]<- .5*x0[t-1] + d[t]
+	e0[t]<- .4*e0[t-1] + nu[t]
+	y0[t]<- .3*x0[t] + e0[t]
+	}
+
+y<-ts(y0[51:(T+50)])
+x<-ts(x0[51:(T+50)])
+time<-c(1:T)
+plot(y=y, x=time,type='l',xlab='time',ylab='y')
+lines(y=x, x=time, lty=2, col='blue')
+axis(4)
+mtext("x", side=4)
+
+data2 <- ts.union(y, l.y=lag(y, -1), x)
+mod.koyck <- lm(y~x+l.y, data=data2)
+summary(mod.koyck)
+mod.fgls.lag <- cochrane.orcutt(mod.koyck)
+summary(mod.fgls.lag)
+mod.nolag <- lm(y~x, data=data2)
+mod.fgls.nolag <- cochrane.orcutt(mod.nolag)
+summary(mod.fgls.nolag)
+cbind(c(mod.koyck$coefficients,NA), 
+      c(mod.fgls.lag$coefficients,mod.fgls.lag$rho), 
+      c(mod.fgls.nolag$coefficients,NA,mod.fgls.nolag$rho))
+
+###Just functional form with LDV v. FGLS###
+rm(list=ls())
+T<-500
+nu<-rnorm(T+50)
+d<-rnorm(T+50)
+
+x0 <- rep(NA,T+50)
+y0 <- rep(NA,T+50)
+e0 <- rep(NA,T+50)
+x0[1] <- d[1]
+y0[1]<- e0[1] <- nu[1]
+
+
+for(t in 2:(T+50)){
+	x0[t]<- .5*x0[t-1] + d[t]
+	e0[t]<- nu[t]
+	y0[t]<- .4*y0[t-1] + .3*x0[t] + e0[t]
+	}
+
+y<-ts(y0[51:(T+50)])
+x<-ts(x0[51:(T+50)])
+time<-c(1:T)
+plot(y=y, x=time,type='l',xlab='time',ylab='y')
+lines(y=x, x=time, lty=2, col='blue')
+axis(4)
+mtext("x", side=4)
+
+data2 <- ts.union(y, l.y=lag(y, -1), x)
+mod.koyck <- lm(y~x+l.y, data=data2)
+summary(mod.koyck)
+mod.fgls.lag <- cochrane.orcutt(mod.koyck)
+summary(mod.fgls.lag)
+mod.nolag <- lm(y~x, data=data2)
+mod.fgls.nolag <- cochrane.orcutt(mod.nolag)
+summary(mod.fgls.nolag)
+cbind(c(mod.koyck$coefficients,NA), 
+      c(mod.fgls.lag$coefficients,mod.fgls.lag$rho), 
+      c(mod.fgls.nolag$coefficients,NA,mod.fgls.nolag$rho))
+
+##############################################################
+```
+
+
+```{r}
+#estimating two-step Aitken model.
+#front matter
+rm(list=ls())
+#install.packages("lmtest")
+#install.packages("dlnm")
+library(lmtest)
+library(dlnm)
+library(foreign)
+library(orcutt)
+library(dyn)
+
+#load data and declare as time series
+qjps<-read.dta("QJPS113.dta")
+ts.qjps<-ts(qjps)
+
+#graph the data
+par(mar=c(5,4,4,4))
+plot(y=qjps$vi,x=qjps$time,type='l',
+     xlab="Month",ylab="Vote Intention (Solid Black Line)",axes=F)
+axis(1,at=seq(456,552,12),labels=c(1998:2006))
+axis(2); box()
+
+par(new=T)
+plot(y=qjps$xrlag,x=qjps$time,type='l',lty=2,
+     col='red',xlab="",ylab="",axes=F)
+axis(4)
+mtext("Exchange Rate (Red Dashed Line)",4,line=2.5)
+
+#OLS with LDV
+table.3.1.1<-dyn$lm(vi~lag(vi,-1)+usxr,data=ts.qjps)
+summary(table.3.1.1)
+lmtest::bgtest(table.3.1.1)
+
+#Modeling lag as a function of lagged exchange rate (instrumental variable)
+iv.step<-dyn$lm(lag(vi,-1)~lag(usxr,-1)+usxr,data=ts.qjps)
+summary(iv.step)
+qjps$l.vi.hat<-c(NA,iv.step$fitted.values)
+
+#reset as time series
+ts.qjps<-ts(qjps)
+
+#Step 2 Regression
+table.3.1.2<-dyn$lm(vi~l.vi.hat+usxr,data=ts.qjps)
+summary(table.3.1.2)
+bgtest(table.3.1.2)
+
+#get the right residuals
+vi<-ts(qjps$vi)
+l.vi<-lag(vi,-1)
+usxr<-ts(qjps$usxr)
+resid.data<-as.data.frame(ts.union(vi,l.vi,usxr))
+#r1<-qjps$vi-10.1509+0.3258*qjps$vilag-85.4651*qjps$usxr
+r2<-resid.data$vi-10.1509+0.3258*resid.data$l.vi-85.4651*resid.data$usxr
+
+
+#What's the rho term?
+arima(r2,order=c(1,0,0))
+rho<-acf(na.omit(r2),1)$acf[[1]];rho
+
+#generalized differences
+resid.data$g.vi<-NA
+resid.data$g.usxr<-NA
+for(t in 2:dim(resid.data)[1]){
+	resid.data$g.vi[t]<-resid.data$vi[t]-rho*resid.data$vi[t-1]
+	resid.data$g.usxr[t]<-resid.data$usxr[t]-rho*resid.data$usxr[t-1]
+}
+
+#final model
+resid.data<-ts(resid.data[-c(1,114),])
+table.3.1.3<-dyn$lm(g.vi~lag(g.vi,-1)+g.usxr,data=resid.data)
+summary(table.3.1.3)
+############################################################
+
+```
+
+### Structural Equations and Granger Causality Tests
+
+```{r}
+#front matter
+rm(list=ls())
+#install.packages("lmtest")
+#install.packages("dlnm")
+library(lmtest)
+library(dlnm)
+library(foreign)
+library(orcutt)
+library(dyn)
+library(systemfit)
+
+#load data and declare as time series
+qjps<-read.dta("QJPS.dta")
+ts.qjps<-ts(qjps)
+qjps<-qjps[qjps$n>157,]
+
+###Simultaneous Equation Model###
+s1<-cpi~ir+usxr+xrlag1
+s2<-ir~cpi+pm+pmlag1
+inst <- ~ usxr+xrlag1+pm+pmlag1
+
+table.4.3.1<-systemfit(list(cpi.mod=s1,ir.mod=s2),data=qjps,method="OLS")
+summary(table.4.3.1)
+table.4.3.2<-systemfit(list(cpi.mod=s1,ir.mod=s2),
+                       inst=inst,data=qjps,method="2SLS")
+summary(table.4.3.2)
+table.4.3.3<-systemfit(list(cpi.mod=s1,ir.mod=s2),
+                       inst=inst,data=qjps,method="3SLS")
+summary(table.4.3.3)
+
+
+###Granger test: 12 lags###
+cpi.lag.only<-dyn$lm(cpi~lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4)+
+                       lag(cpi,-5)+lag(cpi,-6)+lag(cpi,-7)+lag(cpi,-8)+
+                       lag(cpi,-9)+lag(cpi,-10)+lag(cpi,-11)+lag(cpi,-12),
+                     data=ts.qjps)
+summary(cpi.lag.only)
+cpi.full<-dyn$lm(cpi~lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4)+
+                   lag(cpi,-5)+lag(cpi,-6)+lag(cpi,-7)+lag(cpi,-8)+
+                   lag(cpi,-9)+lag(cpi,-10)+lag(cpi,-11)+lag(cpi,-12)+
+                   lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4)+lag(ir,-5)+
+                   lag(ir,-6)+lag(ir,-7)+lag(ir,-8)+lag(ir,-9)+lag(ir,-10)+
+                   lag(ir,-11)+lag(ir,-12),data=ts.qjps)
+summary(cpi.full)
+anova(cpi.full,cpi.lag.only)
+
+ir.lag.only<-dyn$lm(ir~lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4)+
+                      lag(ir,-5)+lag(ir,-6)+lag(ir,-7)+lag(ir,-8)+
+                      lag(ir,-9)+lag(ir,-10)+lag(ir,-11)+lag(ir,-12),
+                    data=ts.qjps)
+summary(ir.lag.only)
+ir.full<-dyn$lm(ir~lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4)+
+                  lag(ir,-5)+lag(ir,-6)+lag(ir,-7)+lag(ir,-8)+
+                  lag(ir,-9)+lag(ir,-10)+lag(ir,-11)+lag(ir,-12)+
+                  lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4)+
+                  lag(cpi,-5)+lag(cpi,-6)+lag(cpi,-7)+lag(cpi,-8)+
+                  lag(cpi,-9)+lag(cpi,-10)+lag(cpi,-11)+lag(cpi,-12),
+                data=ts.qjps)
+summary(ir.full)
+anova(ir.full,ir.lag.only)
+
+
+###Granger test: 4 lags###
+cpi.lag.only.4<-dyn$lm(cpi~lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4),
+                       data=ts.qjps)
+summary(cpi.lag.only.4)
+cpi.full.4<-dyn$lm(cpi~lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4)+
+                     lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4),
+                   data=ts.qjps)
+summary(cpi.full.4)
+anova(cpi.full.4,cpi.lag.only.4)
+
+ir.lag.only.4<-dyn$lm(ir~lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4),
+                      data=ts.qjps)
+summary(ir.lag.only.4)
+ir.full.4<-dyn$lm(ir~lag(ir,-1)+lag(ir,-2)+lag(ir,-3)+lag(ir,-4)+
+                    lag(cpi,-1)+lag(cpi,-2)+lag(cpi,-3)+lag(cpi,-4),
+                  data=ts.qjps)
+summary(ir.full.4)
+anova(ir.full.4,ir.lag.only.4)
+
+
+###Doing 2SLS the hard way###
+iv.ir<-lm(ir~usxr+xrlag1+pm+pmlag1,data=qjps)
+summary(iv.ir)
+qjps$ir.hat<-iv.ir$fitted.values
+cpi.stage.2<-lm(cpi~ir.hat+usxr+xrlag1,data=qjps)
+summary(cpi.stage.2)
+
+iv.cpi<-lm(cpi~usxr+xrlag1+pm+pmlag1,data=qjps)
+summary(iv.cpi)
+qjps$cpi.hat<-iv.cpi$fitted.values
+ir.stage.2<-lm(ir~cpi.hat+pm+pmlag1,data=qjps)
+summary(cpi.stage.2)
+
+############################################################
+
+#Example direct Granger test in R
+
+#load data and create ts.union
+data<-read.csv('IParmsRace.csv')
+
+y<-as.ts(data$India)
+x<-as.ts(data$Pakistan)
+l.y<-lag(data$India,-1)
+l2.y<-lag(data$India,-2)
+l3.y<-lag(data$India,-3)
+l4.y<-lag(data$India,-4)
+l.x<-lag(data$Pakistan,-1)
+l2.x<-lag(data$Pakistan,-2)
+l3.x<-lag(data$Pakistan,-3)
+l4.x<-lag(data$Pakistan,-4)
+data.2<-ts.union(y,x,l.y,l2.y,l3.y,l4.y,l.x,l2.x,l3.x,l4.x,dframe=TRUE)
+#I'm going with 4 lags here, but it's up to you!
+
+#Suppose I believe Pakistan's expenditures cause India's.
+#Start with linear models of y.
+y.with.x<-lm(y~l.y+l2.y+l3.y+l4.y+l.x+l2.x+l3.x+l4.x,data=data.2)
+y.without.x<-lm(y~l.y+l2.y+l3.y+l4.y,data=data.2)
+
+#Block F-test that Pakistan informs our conditional expectation of India:
+anova(y.with.x, y.without.x)
+#It's not significant.
+
+#Does India's expenditures cause Pakistan's?
+x.with.y<-lm(x~l.x+l2.x+l3.x+l4.x+l.y+l2.y+l3.y+l4.y,data=data.2)
+x.without.y<-lm(x~l.x+l2.x+l3.x+l4.x,data=data.2)
+
+#Block F-test that India informs our conditional expectation of Pakistan:
+anova(x.with.y, x.without.y)
+#It's significant, which suggests India's expenditures are 
+#exogenous to Pakistan's (consistent with Freeman 1983).
+
+#QUICK ROBUSTNESS CHECK: TWO LAGS
+#Does Pakistan influence India?
+y.with.x<-lm(y~l.y+l2.y+l.x+l2.x,data=data.2)
+y.without.x<-lm(y~l.y+l2.y,data=data.2)
+anova(y.with.x, y.without.x)
+
+#Does India Influence Pakistan?
+x.with.y<-lm(x~l.x+l2.x+l.y+l2.y,data=data.2)
+x.without.y<-lm(x~l.x+l2.x,data=data.2)
+anova(x.with.y, x.without.y)
+#Same findings.
+############################################################
+
+```
+
+
+### Vector Autoregression
+
+```{r}
+#front matter
+rm(list=ls())
+library(vars)
+
+#load data on the Canadian economy: productivity, employment, unemployment, real wage
+data(Canada)
+
+#run a VAR model, Estimation of a VAR by utilising OLS per equation.
+var.model <-vars::VAR(Canada, p=2, type="const") 
+#type could also be "none", "trend", or "both"
+
+#allow the BIC to choose the best lag length
+var.model.2 <-VAR(Canada, p=2, lag.max=10, ic="AIC", type="const")
+
+#Assess the model
+plot(var.model)
+
+#test for serial correlation
+vars::serial.test(var.model, lags.pt = 16, type = "PT.adjusted")
+
+#Does employment have a Granger causal effect?
+vars::causality(var.model, cause="e")
+
+#What's the impulse response if we perturb employment?
+var.model.irf <- vars::irf(var.model, impulse = "e", 
+                           response = c("prod", "rw", "U"), boot =FALSE)
+
+#Impulse response analysis
+plot(var.model.irf)
+
+#the following is necessary if you do not want to use the whole data set in your VAR model:
+Canada.2<-as.data.frame(Canada)
+e<-ts(Canada.2$e)
+rw<-ts(Canada.2$rw)
+U<-ts(Canada.2$U)
+prod<-ts(Canada.2$prod)
+Canada.3<-ts.union(e,rw,U,dframe=TRUE)
+
+#run a VAR model where productivity is exogenous
+var.with.exogenous <-VAR(Canada.3, p=2, type="const", exogen=prod)
+```
+
+```{r}
+
+####################################################################
+###SOURCE: Patrick Brandt's documentation for MSBVAR on CRAN.###
+#install.packages("MSBVAR")
+#install.packages("bit")
+#install.packages("/Users/deng/Downloads/MSBVAR_0.9-3.tar.gz", repos=NULL, type="source")
+library(MSBVAR)
+
+#load data
+data(IsraelPalestineConflict)
+
+#create a vector of variable names
+varnames <- colnames(IsraelPalestineConflict)
+
+#specify Bayesian Vector Autoregression Model
+fit.BVAR <- szbvar(IsraelPalestineConflict, p=6, z=NULL,
+                           lambda0=0.6, lambda1=0.1,
+                            lambda3=2, lambda4=0.25, lambda5=0, mu5=0,
+                            mu6=0, nu=3, qm=4,
+                            prior=0, posterior.fit=FALSE)
+
+# Draw from the posterior pdf of the impulse responses.
+posterior.impulses <- mc.irf(fit.BVAR, nsteps=10, draws=5000)
+
+# Plot the responses
+plot(posterior.impulses, method=c("Sims-Zha2"), component=1,
+         probs=c(0.16,0.84), varnames=varnames) 
+####################################################################
+```
+
+### Univariate, Nonstationary Processes
+
+```{r}
+#clean up
+rm(list=ls())
+
+#load packages
+library(foreign)
+library(aTSA) #for Dickey-Fuller test
+library(tseries) #for KPSS test
+
+#load data
+macro<-read.dta("partyid.dta")
+
+#descriptives and line plots
+summary(macro)
+plot(y=macro$macropart,x=macro$qdate,type='l',
+     xlab="Time",ylab="Macropartisanship",axes=F)
+axis(1,at=seq(from=-28,to=131,by=16),
+     label=seq(from=1953,to=1992,by=4))
+axis(2);box()
+
+plot(y=macro$consumer,x=macro$qdate,type='l',
+     xlab="Time",ylab="Consumer Sentiment",axes=F)
+axis(1,at=seq(from=-28,to=131,by=16),
+     label=seq(from=1953,to=1992,by=4));axis(2);box()
+
+plot(y=macro$papp,x=macro$qdate,type='l',
+     xlab="Time",ylab="Presidential Approval",axes=F)
+axis(1,at=seq(from=-28,to=131,by=16),
+     label=seq(from=1953,to=1992,by=4));axis(2);box()
+
+#ACF and PACF of each series
+acf(macro$macropart,16)
+pacf(macro$macropart,16)
+print(acf(macro$macropart,16))
+
+acf(macro$consumer,16)
+pacf(macro$consumer,16)
+print(acf(macro$consumer,16))
+
+acf(macro$papp,16)
+pacf(macro$papp,16)
+print(acf(macro$papp,16))
+
+#Dickey-Fuller tests (Table 5.2)
+#Note: Stata's default is with drift and no trend, zero lags. 
+#You can adjust this if you feel the need, though.
+tseries::adf.test(macro$macropart)
+aTSA::adf.test(macro$macropart) #null is nonstationary, so a significant result means stationary
+aTSA::adf.test(macro$consumer)
+aTSA::adf.test(macro$papp)
+
+#Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test (Table 5.6)
+aTSA::kpss.test(macro$macropart)
+
+#null is stationary, so a significant result means nonstationary
+tseries::kpss.test(macro$macropart) 
+
+tseries::kpss.test(macro$consumer)
+tseries::kpss.test(macro$papp)
+
+#ARIMA models for macropartisanship, Table 5.7
+mod.ar1<-arima(macro$macropart,order=c(1,0,0));mod.ar1
+mod.i1<-arima(macro$macropart,order=c(0,1,0));mod.i1
+mod.ari11<-arima(macro$macropart,order=c(1,1,0));mod.ari11
+
+#diagnose each
+acf(mod.ar1$resid,16)
+pacf(mod.ar1$resid,16)
+Box.test(mod.ar1$resid,16,"Ljung-Box")
+
+acf(mod.i1$resid,16)
+pacf(mod.i1$resid,16)
+Box.test(mod.i1$resid,16,"Ljung-Box")
+
+acf(mod.ari11$resid,16)
+pacf(mod.ari11$resid,16)
+Box.test(mod.ari11$resid,16,"Ljung-Box")
+
+#Just for fun. An alternative estimator of the ARI(1,1) model.
+library(dyn)
+d.macropart<-ts(diff(macro$macropart))
+macro$d.macropart<-c(NA,d.macropart)
+head(macro)
+ls.ari11<-dyn$lm(d.macropart~lag(d.macropart,-1));summary(ls.ari11)
+
+
+```
+
+### Error Correction Models
+
+```{r}
+rm(list=ls())
+library(tseries)
+
+#set obs
+n<-500
+
+#generate two disturbances
+delta<-rnorm(n)
+epsilon<-rnorm(n)
+
+#create two variables
+x<-rep(NA,n)
+y<-rep(NA,n)
+x[1]<-0
+y[1]<-0
+
+#create two random walks
+for(t in 2:n){
+x[t]<-x[t-1]+delta[t]
+}
+
+for(t in 2:n){
+y[t]<-y[t-1]+epsilon[t]
+}
+
+#Are x & y integrated series? Remember, non-significant means integrated.
+adf.test(x, k=0)
+adf.test(y, k=0)
+
+#Are they cointegrated?
+mod.1 <-lm(y~x)
+adf.test(mod.1$residuals)
+
+###################################################
+
+rm(list=ls())
+library(foreign)
+library(timeSeries)
+library(tseries)
+library(dyn)
+library(aTSA)
+options(scipen=12)
+
+#load data and create lags
+ip<-read.dta("indipaki.dta")
+
+#data cleaning
+ip$d.pakds<-c(NA,diff(ip$pakds))
+ip$d.indds<-c(NA,diff(ip$indds))
+ip.1<-subset(ip,year<1991)
+
+#plot the series
+plot(y=ip.1$indds,x=ip.1$year,type='l',
+     xlab="Year",ylab="Spending (Millions of U.S. Dollars)",axes=F)
+lines(y=ip.1$pakds,x=ip.1$year,lty=2,col='blue')
+axis(1);axis(2, at=c(0,2000000,4000000,6000000,8000000,10000000),
+             labels=c(0,2000,4000,6000,8000,10000));box()
+legend(x=1950,y=10000000,legend=c("India","Pakistan"),
+       lty=c(1,2),col=c("black","blue"))
+
+
+####SUPPOSE WE BELIEVE THEORETICALLY THAT PAKISTAN'S SPENDING SHAPES INDIA'S IN A ONE-WAY RELATIONSHIP###
+#Dickey-Fuller tests
+aTSA::adf.test(ip.1$pakds) #null is nonstationary, so a significant result means stationary
+aTSA::adf.test(ip.1$indds)
+
+#Step 1 of the Engle-Granger Two-Step estimation
+equilibrium<-lm(indds~pakds,data=ip.1)
+summary(equilibrium)
+ip.1$z<-equilibrium$residuals
+head(ip.1)
+
+#Are the residuals stationary?
+aTSA::adf.test(ip.1$z) #null is nonstationary, so a significant result means stationary
+plot(y=ip.1$z,x=ip.1$year,type='l')
+acf(ip.1$z,15)
+pacf(ip.1$z,15)
+
+#Step 2, Version A: zero lag model testing for error correction only
+ip.2<-ts(ip.1)
+ind.0<-dyn$lm(d.indds~lag(z,-1),data=ip.2)
+summary(ind.0)
+
+#Step 2, Version B: allowing for error correction and Granger causation
+ind.1<-dyn$lm(d.indds~lag(z,-1)+d.pakds,data=ip.2)
+summary(ind.1)
+
+#Engle-Granger Single Equation Estimation
+ind.one.step<-dyn$lm(d.indds~lag(indds,-1)+lag(pakds,-1)+d.pakds,data=ip.2)
+summary(ind.one.step)
+
+
+####CONSIDERING THE TWO-WAY APPROACH FROM THE TEXT####
+#Step 1 of the Engle-Granger Two-Step estimation
+equilibrium.2<-lm(pakds~indds,data=ip.1)
+summary(equilibrium)
+ip.1$z.2<-equilibrium.2$residuals
+head(ip.1)
+
+#Step 2, Version A: zero lag model testing for error correction only
+ip.2<-ts(ip.1)
+ind.0<-dyn$lm(d.indds~lag(z.2,-1),data=ip.2);summary(ind.0)
+pak.0<-dyn$lm(d.pakds~lag(z.2,-1),data=ip.2);summary(pak.0)
+
+#Step 2, Version B: allowing for error correction and Granger causation
+ind.3<-dyn$lm(d.indds~lag(d.indds,-1)+lag(d.indds,-2)+
+                lag(d.indds,-3)+lag(d.pakds,-1)+lag(d.pakds,-2)+
+                lag(d.pakds,-3)+lag(z.2,-1),data=ip.2);summary(ind.3)
+pak.3<-dyn$lm(d.pakds~lag(d.indds,-1)+lag(d.indds,-2)+
+                lag(d.indds,-3)+lag(d.pakds,-1)+lag(d.pakds,-2)+
+                lag(d.pakds,-3)+lag(z.2,-1),data=ip.2);summary(pak.3)
+
+#Granger Causality tests
+ind.subset<-dyn$lm(d.indds~lag(d.indds,-1)+lag(d.indds,-2)+
+                     lag(d.indds,-3)+lag(z.2,-1),data=ip.2)
+summary(ind.subset)
+pak.subset<-dyn$lm(d.pakds~lag(d.pakds,-1)+lag(d.pakds,-2)+
+                     lag(d.pakds,-3)+lag(z.2,-1),data=ip.2)
+summary(pak.subset)
+anova(ind.subset,ind.3)
+anova(pak.subset,pak.3)
+######################################################################
+```
+
+
+### Heteroscedasticity in Time Series
+
+```{r}
+#front matter
+rm(list=ls())
+#install.packages("fGarch")
+#install.packages("tseries")
+library(fGarch)
+library(tseries)
+
+#Monte Carlo example: generate and fit an ARCH(2) model
+n <- 1100
+a <- c(0.1, 0.5, 0.2)  # ARCH(2) coefficients
+e <- rnorm(n)  
+x <- double(n)
+x[1:2] <- rnorm(2, sd = sqrt(a[1]/(1.0-a[2]-a[3]))) 
+for(i in 3:n)  # Generate ARCH(2) process
+{
+  x[i] <- e[i]*sqrt(a[1]+a[2]*x[i-1]^2+a[3]*x[i-2]^2)
+}
+x <- ts(x[101:1100])
+x.arch <- garchFit(formula=~garch(2,0), 
+                   include.mean=FALSE, 
+                   data=x, trace=FALSE)  # Fit ARCH(2)
+### omega is the constant in "h", alpha refers to MA terms, beta refers to AR terms
+### NOTE DIFFERENCES FROM "garch" IN "tseries" ###
+summary(x.arch)          
+#plot(x.arch)                        
+#post-diagnosis: plot 11 (ACF of squared residuals) is a good choice to see if we filtered heteroscedasticity
+
+
+#####Working with real data on EU stock markets#####
+data(EuStockMarkets)  
+
+###Start with diagnosis###
+plot(EuStockMarkets[,"DAX"], type='l')
+#more variable at higher values, but first trending
+plot(diff(EuStockMarkets)[,"DAX"], type='l')
+#still more variable at higher values, so take the difference of the log
+plot(diff(log(EuStockMarkets))[,"DAX"], type='l')
+#still heteroscedastic
+
+#sizing-up potential heteroscedasticity
+squares<-diff(log(EuStockMarkets))[,"DAX"]^2
+
+#ACF/PACF/Box-Test--They're valid for variances too!
+acf(squares, 20)
+pacf(squares, 20)
+Box.test(squares, 20, 'Ljung-Box')
+
+#Here's a model with no ARMA process, and ARCH(2)
+dax.garch.1 <- garchFit(formula=~garch(2,0), 
+                        data=diff(log(EuStockMarkets))[,"DAX"], 
+                        trace=FALSE)  
+summary(dax.garch.1)
+#plot(dax.garch.1)
+#It's a winner!
+
+#Here's a model with no ARMA process, and GARCH(1,1)
+dax.garch.2 <- garchFit(formula=~garch(1,1), 
+                        data=diff(log(EuStockMarkets))[,"DAX"], 
+                        trace=FALSE)  
+summary(dax.garch.2)  
+#plot(dax.garch.2)     
+#This one rocks our world more.
+
+#Here's a model with an ARMA(1,1) process, and GARCH(1,1)
+dax.garch.3 <- garchFit(formula=~arma(1,1)+garch(1,1),
+                        data=diff(log(EuStockMarkets))[,"DAX"], 
+                        trace=FALSE)  
+summary(dax.garch.3)  
+#plot(dax.garch.3)     
+#AR and MA are superfluous.
+
+#Make a plot selection (or 0 to exit): 
+
+ #1:   Time Series
+# 2:   Conditional SD
+# 3:   Series with 2 Conditional SD Superimposed
+# 4:   ACF of Observations
+# 5:   ACF of Squared Observations
+# 6:   Cross Correlation
+# 7:   Residuals
+# 8:   Conditional SDs
+# 9:   Standardized Residuals
+#10:   ACF of Standardized Residuals
+#11:   ACF of Squared Standardized Residuals
+#12:   Cross Correlation between r^2 and r
+#13:   QQ-Plot of Standardized Residuals
+```
+
+
+
+
+
+## Panel data analysis
+
+### Visualizing Longitudinal and Clustered Data
+
+```{r}
+#https://spia.uga.edu/faculty_pages/monogan/teaching/pd/
+# cleanup
+rm(list=ls())
+library(lattice)
+
+# load data
+divorce <- read.table("Divorce.txt", sep ="\t", quote = "",header=TRUE)
+#divorce<-read.table("//spia.uga.edu/faculty_pages/monogan/teaching/pd/Divorce.txt", 
+#                    sep ="\t", quote = "",header=TRUE)
+
+# Create a new variable for year
+divorce$YEAR=divorce$TIME*10+1955
+
+#quick overview of data
+head(divorce)
+summary(divorce)
+
+# Individual-Level Time Plot Using "lattice" Graphics
+#trellis.device("png",color=FALSE,file="stateDivorce.png")
+xyplot(DIVORCE~YEAR, data=divorce, type='l', 
+       groups=STATE, xlab="Year", ylab="Divorce Rate")
+#dev.off()
+
+#regional subsets of individual time plot
+xyplot(DIVORCE~YEAR, data=divorce, type='l', 
+       groups=STATE, xlab="Year", ylab="Divorce Rate",subset=Region=="New England")
+xyplot(DIVORCE~YEAR, data=divorce, type='l', 
+       groups=STATE, xlab="Year", ylab="Divorce Rate",subset=Region=="South Atlantic")
+
+# Time Plot of Means
+divorce.2 <- na.omit(divorce)
+div.mean <- by(divorce.2$DIVORCE, divorce.2$YEAR, mean)
+years <- c(1965,1975,1985,1995)
+plot(div.mean ~ years, type='o')
+
+# Box Plot
+boxplot(DIVORCE~YEAR, data=divorce)
+
+
+#####ALTERNATE CODE#####
+#  Individual-Level Time Plot Using "base" Graphics
+plot(DIVORCE ~ YEAR, data = divorce)
+   for (i in divorce$STATE) {
+   lines(DIVORCE ~ YEAR, data = subset(divorce, STATE == i), col='gray60') }
+
+#  Individual-Level Time Plot for New England v. South
+par(mfrow=c(2,1))
+plot(DIVORCE ~ YEAR, 
+     data = subset(divorce, Region=="New England"), 
+     main="New England")
+   for (i in divorce$STATE) {
+   lines(DIVORCE ~ YEAR, 
+         data = subset(divorce, STATE == i & Region=="New England"), 
+         col='gray60') 
+     }
+
+plot(DIVORCE ~ YEAR, 
+     data = subset(divorce, Region=="South Atlantic"), 
+     main="South Atlantic")
+   for (i in divorce$STATE) {
+   lines(DIVORCE ~ YEAR, 
+         data = subset(divorce, STATE == i & Region=="South Atlantic"), 
+         col='gray60') 
+     }
+
+
+#####################################################################
+
+# Illustration on variance components
+
+#set time
+t<-c(1:4)
+
+#deterministic trends, notice variation between individuals
+trend.1<- 1+.5*t
+trend.2<- 2+.25*t
+plot(y=trend.1,x=t,type='l',ylim=c(0,5))
+lines(y=trend.2,x=t,lty=2)
+
+#plus natural variation
+cycle.1<-trend.1+rnorm(4,sd=.1)
+cycle.2<-trend.2+rnorm(4,sd=.1)
+plot(y=cycle.1,x=t,type='l',ylim=c(0,5))
+lines(y=cycle.2,x=t,lty=2)
+
+#plus measurement error
+observed.1<-cycle.1+rnorm(4,sd=.1)
+observed.2<-cycle.2+rnorm(4,sd=.1)
+plot(y=observed.1,x=t,type='l',ylim=c(0,5))
+lines(y=observed.2,x=t,lty=2)
+
+#all at once
+plot(y=trend.1,x=t,type='l',ylim=c(0,5),xlab="x",ylab="y",col='red')
+lines(y=trend.2,x=t,lty=2,col='blue')
+points(y=cycle.1,x=t,pch=20,col='red')
+points(y=cycle.2,x=t,pch=20,col='blue')
+points(y=observed.1,x=t,col='red')
+points(y=observed.2,x=t,col='blue')
+#####################################################################
+
+```
+
+
+
+### Reshaping Panel Data and Simple Pooled OLS Example
+
+```{r}
+#clean up
+rm(list=ls())
+
+#required packages
+library(foreign)
+
+##SECTION 2.5: MERGING AND RESHAPING DATA##
+#load 1994 and 1995 data in CSV format
+#hmnrghts.94<-read.csv("http://j.mp/PTS1994")
+#hmnrghts.95<-read.csv("http://j.mp/PTS1995")
+hmnrghts.94<-read.csv("pts1994.csv")
+hmnrghts.95<-read.csv("pts1995.csv")
+
+#view the top of each data set
+head(hmnrghts.94)
+head(hmnrghts.95)
+
+#subset 1995 data to necessary variables only
+hmnrghts.95<-subset(hmnrghts.95,select=c(COW,Amnesty.1995,StateDept.1995))
+
+#merge 1994 and 1995 data
+hmnrghts.wide<-merge(x=hmnrghts.94,y=hmnrghts.95,by=c("COW"))
+
+#view merged data
+head(hmnrghts.wide)
+
+#number of observations and variables of 1994, 1995, and merged data
+dim(hmnrghts.94); dim(hmnrghts.95); dim(hmnrghts.wide)
+
+#reshape merged data into long format
+hmnrghts.long<-reshape(hmnrghts.wide,
+                       varying=c("Amnesty.1994","StateDept.1994","Amnesty.1995","StateDept.1995"),
+                       timevar="year",idvar="COW",direction="long",sep=".")
+
+#view the top of the long data, then the first few 1995 observations
+head(hmnrghts.long)
+head(hmnrghts.long[hmnrghts.long$year==1995,])
+
+#reshape long data into wide form
+hmnrghts.wide.2<-reshape(hmnrghts.long,
+                      v.names=c("Amnesty","StateDept"),
+                      timevar="year",idvar="COW",direction="wide",sep=".")
+
+#view top of new wide data
+head(hmnrghts.wide.2)
+
+##MORE MERGING##
+#more data
+#hmnrghts.93 <- read.dta("http://j.mp/PTKstata")
+hmnrghts.93 <- read.dta("hmnrghts.dta")
+
+colnames(hmnrghts.93)<-c('country','polity.93','StateDept.1993',
+                         'military.93','gnpcats.93','lpop.93',
+                         'civ_war.93','int_war.93')
+
+#new merge, and some problems
+hmnrghts.wide$Country<-tolower(hmnrghts.wide$Country)
+test.1<-merge(x=hmnrghts.wide,y=hmnrghts.93,by.x="Country",by.y="country",all.x=T)
+test.2<-merge(x=hmnrghts.wide,y=hmnrghts.93,by.x="Country",by.y="country",all=T)
+dim(hmnrghts.wide);dim(hmnrghts.93);dim(test.1);dim(test.2)
+summary(test.1)
+#Differences? Can they be fixed?
+
+#reshape
+hmnrghts.three.long<-reshape(test.1,
+                      varying=c("StateDept.1993","StateDept.1994","StateDept.1995"),
+                      timevar="year",idvar="COW",direction="long",sep=".")
+head(hmnrghts.three.long)
+
+##QUICK DESCRIPTIVE STATS##
+summary(hmnrghts.three.long)
+
+##BOXPLOTS##
+par(mfrow=c(1,2))
+boxplot(StateDept~year,data=hmnrghts.three.long,
+        subset=polity.93>=6,ylim=c(1,5),main="More Democratic")
+boxplot(StateDept~year,data=hmnrghts.three.long,
+        subset=polity.93<6,ylim=c(1,5),main="Less Democratic")
+
+#simple pooled model
+hmnrghts.three.long$time<-hmnrghts.three.long$year-1993
+hmnrghts.three.long$dummy<-as.numeric(hmnrghts.three.long$polity.93>=6)
+pooled.mod<-lm(StateDept~time*dummy,data=hmnrghts.three.long)
+summary(pooled.mod)
+
+#####################################################################
+
+```
+
+
+### Modeling the Mean: Response Profiles v. Parametric Curves
+
+```{r}
+
+#Load libraries
+rm(list=ls())
+library(nlme)
+library(car)
+
+
+###DATA MANAGEMENT###
+#load data
+#tlc<-read.table(file.choose(), header=TRUE, sep="")
+tlc<-read.table("tlc.txt", header=TRUE, sep="")
+
+#reshape data
+m.tlc<-reshape(tlc, varying=c("w0","w1","w4","w6"), idvar="id", timevar="week",direction="long",sep="")
+
+#relevel treatment so that Placebo is the reference
+m.tlc$treat<-relevel(m.tlc$treat,"P")
+
+#rename our dependent variable of blood lead level from "w" to "value"
+colnames(m.tlc)[4]<-"value"
+
+
+###RESPONSE PROFILES###
+#Just for the heck of it: OLS
+ols.profiles<-lm(value~as.factor(treat)+as.factor(week)+
+                   as.factor(treat)*as.factor(week), data=m.tlc)
+summary(ols.profiles)
+
+#Now the real model: GLS with REML (note: you need 'nlme' here)
+# This function fits a linear model using generalized least squares. The errors are allowed to be correlated and/or have unequal variances.
+gls.profiles<-nlme::gls(value~as.factor(treat)+as.factor(week)+
+                    as.factor(treat)*as.factor(week), 
+                  data=m.tlc, method="REML", 
+                  correlation= corSymm(form=~1|id), 
+                  na.action=na.omit)
+#What do you make of the na.action?
+#next week: more on corClasses
+summary(gls.profiles)
+AIC(gls.profiles)
+
+#Means of placebo and treated
+placebo.mean <- by(m.tlc$value[m.tlc$treat=="P"], 
+                   m.tlc$week[m.tlc$treat=="P"], 
+                   mean, na.rm=T)
+agent.mean <- by(m.tlc$value[m.tlc$treat=="A"], 
+                 m.tlc$week[m.tlc$treat=="A"], 
+                 mean)
+
+#Plot Expectations
+a<-gls.profiles$coefficients
+time<-c(0,1,4,6)
+placebo<-c(a[1],a[1]+a[3],a[1]+a[4],a[1]+a[5])
+agent<-c(a[1]+a[2],a[1]+a[2]+a[3]+a[6],
+         a[1]+a[2]+a[4]+a[7],a[1]+a[2]+a[5]+a[8])
+
+plot(y=placebo,x=time,type='l',ylim=c(10,30))
+lines(y=agent,x=time,lty=2)
+points(y=placebo.mean,x=time)
+points(y=agent.mean,x=time,pch=20)
+
+#Do over-time response profiles differ by group?
+#Wald test
+rhs<-c(0,0,0)
+hm<-rbind(
+c(0,0,0,0,0,1,0,0),
+c(0,0,0,0,0,0,1,0),
+c(0,0,0,0,0,0,0,1)
+)
+linearHypothesis(gls.profiles,hm,rhs)
+
+#LR test (notice re-estimation with ML)
+gls.ml<-gls(value~as.factor(treat)+as.factor(week)+
+              as.factor(treat)*as.factor(week), 
+            data=m.tlc, method="ML", 
+            correlation= corSymm(form=~1|id))
+
+no.inter<-gls(value~as.factor(treat)+as.factor(week), 
+              data=m.tlc, method="ML", 
+              correlation= corSymm(form=~1|id))
+
+anova(gls.ml,no.inter)
+
+
+###PARAMETRIC CURVES###
+#Linear Time Trend
+linear<-gls(value~as.factor(treat)+week+
+              as.factor(treat)*week, data=m.tlc, 
+            method="REML", correlation= corSymm(form=~1|id))
+summary(linear)
+AIC(linear)
+
+#Quadratic Time Trend
+quadratic<-gls(value~as.factor(treat)+week+I(week^2)+
+                 as.factor(treat)*week+as.factor(treat)*I(week^2), 
+               data=m.tlc, method="REML", correlation= corSymm(form=~1|id))
+summary(quadratic)
+AIC(quadratic)
+
+#Spline with One Knot
+m.tlc$w1<-pmax(m.tlc$week-1,0) #note: parallel maxima
+spline<-gls(value~as.factor(treat)+week+w1+as.factor(treat)*week+
+              as.factor(treat)*w1, data=m.tlc, method="REML", 
+            correlation= corSymm(form=~1|id)) 
+summary(spline) #we included the treatment main effect
+AIC(spline)
+
+#draw pictures and compare to repsonse profiles
+time.ruler<-seq(0,6,by=.01)
+spline.ruler<-pmax(time.ruler-1,0) 
+newdata.P<-m.tlc[rep(1,601),]
+newdata.P[,2]<-as.factor("P")
+newdata.P[,3]<-time.ruler
+newdata.P[,5]<-spline.ruler
+newdata.A<-m.tlc[rep(1,601),]
+newdata.A[,2]<-as.factor("A")
+newdata.A[,3]<-time.ruler
+newdata.A[,5]<-spline.ruler
+
+placebo.linear<-predict(linear,newdata=newdata.P)
+agent.linear<-predict(linear,newdata=newdata.A)
+placebo.quadratic<-predict(quadratic,newdata=newdata.P)
+agent.quadratic<-predict(quadratic,newdata=newdata.A)
+placebo.spline<-predict(spline,newdata=newdata.P)
+agent.spline<-predict(spline,newdata=newdata.A)
+
+#plot all forms of our model in the same space (calls on objects created in response profile code)
+#also try adding one model's lines at a time
+plot(y=placebo.mean,x=time,type='p',ylim=c(10,30))
+points(y=agent.mean,x=time,pch=20)
+lines(y=placebo,x=time)
+lines(y=agent,x=time,lty=2)
+lines(y=placebo.linear,x=time.ruler,col='blue')
+lines(y=agent.linear,x=time.ruler,col='blue',lty=2)
+lines(y=placebo.quadratic,x=time.ruler,col='red')
+lines(y=agent.quadratic,x=time.ruler,col='red',lty=2)
+lines(y=placebo.spline,x=time.ruler,col='forestgreen')
+lines(y=agent.spline,x=time.ruler,col='forestgreen',lty=2)
+```
+
+
+### Modeling the Covariance and Analyzing Residuals
+
+```{r}
+#clean up
+rm(list=ls())
+
+#Load libraries
+library(nlme)
+library(reshape)
+library(car)
+
+###DATA MANAGEMENT###
+#load data (missing is listed as ".")
+#exercise<-read.table(file.choose(), header=TRUE, sep="")
+exercise.0<-read.table("exercise.txt", header=TRUE, sep="", na.strings=".")
+
+#listwise deletion (Gasp!)
+exercise<-na.omit(exercise.0)
+
+#reshape data
+m.exercise<-melt.data.frame(data=exercise, 
+                            measure.vars=c("d0","d2","d4","d6",
+                                           "d8","d10","d12"), 
+                            id=c("id","prog"))
+
+m.exercise$value<-as.numeric(m.exercise$value)
+
+#create variable for day
+m.exercise$day<-as.numeric(substr(m.exercise$variable,2,3))
+
+#Subset to make waves uneven for the purpose of illustration
+data<-subset(m.exercise, day==0 | day==4 | day==6 | day==8 | day==12)
+
+#relevel treatment so that Placebo is the reference
+data$treat<-data$prog-1
+
+
+###CHOOSE A COVARIANCE STRUCTURE###
+##Unstructured##
+unstructured<-gls(value~treat+as.factor(day)+treat*as.factor(day), 
+                  data=data, method="REML", na.action=na.omit, 
+                  correlation= corSymm(form=~1|id))
+summary(unstructured)
+AIC(unstructured)
+
+##First-Order Autoregressive##
+ar.1<-gls(value~treat+as.factor(day)+treat*as.factor(day), 
+          data=data, method="REML", na.action=na.omit, 
+          correlation= corAR1(form=~1|id))
+summary(ar.1)
+AIC(ar.1)
+
+#What does the AR(1) look like?
+p.1<-0.9546676
+
+#remember: 0, 4, 6, 8, 12
+row1 <-c(1,p.1,p.1^2,p.1^3,p.1^4)
+row2 <-c(p.1,1,p.1,p.1^2,p.1^3)
+row3 <-c(p.1^2,p.1,1,p.1,p.1^2)
+row4 <-c(p.1^3,p.1^2,p.1,1,p.1)
+row5 <-c(p.1^4,p.1^3,p.1^2,p.1,1)
+
+ar1.cor<-rbind(row1,row2,row3,row4,row5); ar1.cor
+
+#Exponential##
+exp.mod<-gls(value~treat+as.factor(day)+treat*as.factor(day), 
+             data=data, method="REML", na.action=na.omit, 
+             correlation= corCAR1(form=~day|id))
+summary(exp.mod)
+AIC(exp.mod)
+
+#What does the exponential look like?
+p<-0.9835166
+
+#remember: 0, 4, 6, 8, 12
+r1 <-c(1,p^4,p^6,p^8,p^12)
+r2 <-c(p^4,1,p^2,p^4,p^8)
+r3 <-c(p^6,p^2,1,p^2,p^6)
+r4 <-c(p^8,p^4,p^2,1,p^4)
+r5 <-c(p^12,p^8,p^6,p^4,1)
+
+exp.cor<-rbind(r1,r2,r3,r4,r5); exp.cor
+
+#Toeplitz (back door)
+ar.4<-gls(value~treat+as.factor(day)+treat*as.factor(day), 
+          data=data, method="REML", na.action=na.omit, 
+          correlation= corARMA(p=4, form=~1|id))
+summary(ar.4)
+AIC(ar.4)
+
+#What does it look like?
+t.0<-1
+t.1<-0.70405177
+t.2<-0.70405177^2 + 0.35048067
+t.3<- 0.70405177^3 + 0.35048067^2 -0.12343874
+t.4<- 0.70405177^4 + 0.35048067^3 +(-0.12343874)^2 + 0.03547153
+
+r1 <-c(t.0,t.1,t.2,t.3,t.4)
+r2 <-c(t.1,t.0,t.1,t.2,t.3)
+r3 <-c(t.2,t.1,t.0,t.1,t.2)
+r4 <-c(t.3,t.2,t.1,t.0,t.1)
+r5 <-c(t.4,t.3,t.2,t.1,t.0)
+
+toep.cor<-rbind(r1,r2,r3,r4,r5); toep.cor
+
+
+###RESIDUAL ANALYSIS###
+#create transformed residuals
+data$resid<-ar.1$resid
+data$yhat<-fitted(ar.1)
+alt.Sigma<-(unstructured$sigma^2)*as.matrix(unstructured$modelStruct$corStruct)$'2' #strategy for unstructured
+Sigma<-(ar.1$sigma^2)*ar1.cor #strategy for first-order autoregressive
+tL<-chol(alt.Sigma)
+L<-t(tL)
+L%*%tL
+inv.lower<-solve(L)
+for(i in data$id){
+	data$std[data$id==i]<-inv.lower%*%as.matrix(data$resid[data$id==i])
+	data$fit.std[data$id==i]<-inv.lower%*%as.matrix(data$yhat[data$id==i])
+}
+
+#plot transformed residuals against transformed fitted values
+plot(y=data$std,x=data$fit.std)
+plot(y=data$std,x=data$day)
+
+#plot untransformed residuals against fitted values
+plot(y=data$resid,x=data$yhat)
+plot(y=data$resid,x=data$day)
+
+#semivariogram
+#plot(Variogram(ar.1, form=~day|id,resType="normalized"))
+#contrast:
+#plot(Variogram(ar.1, form=~day|id))
+
+#Mahalanobis distance
+data$d<-rep(NA,nrow(data))
+data$p<-rep(NA,nrow(data))
+
+for(i in data$id){
+	r<-as.vector(data$std[data$id==i])
+	data$d[data$id==i]<-t(r)%*%r
+	data$p[data$id==i]<-1-pchisq(data$d[i],df=length(r))
+}
+
+table(data$id[data$p<.05])
+length(table(data$id[data$p<.05]))/23
+```
+
+### Linear Mixed Effects Models
+
+```{r}
+#clean up
+rm(list=ls())
+
+#packages
+library(faraway)
+library(lme4)
+library(nlme)
+library(lattice)
+
+#load data
+data(psid)
+
+#View the data
+xyplot(log(income+100)~year|sex, psid, type='l', groups=person)
+boxplot(log(income+100)~year, psid)
+
+#Create a variable: "centered year"
+psid$cyear <- psid$year-78
+
+
+
+#Run a mixed-effects model with random intercept only
+#Syntax for "lme4" library
+income.mod.int <- lmer(log(income)~cyear*sex+age+educ+(1|person), data=psid)
+summary(income.mod.int)
+
+#Syntax for "lme" library
+income.mod.int.2 <- lme(log(income)~cyear*sex+age+educ+cyear, 
+                        random=~1|person, data=psid)
+summary(income.mod.int.2)
+
+
+
+#Try a fixed effects model
+income.mod.fe <- lm(log(income)~cyear*sex+age+educ+cyear+as.factor(person), 
+                    data=psid)
+summary(income.mod.fe)
+
+
+#Run a mixed-effects model with random intercept and random slope of year
+#Syntax for "lme4" library
+income.mod <- lmer(log(income)~cyear*sex+age+educ+(cyear|person), data=psid)
+summary(income.mod)
+
+#Syntax for "lme" library
+income.mod.2 <- lme(log(income)~cyear*sex+age+educ+cyear, 
+                    random=~cyear|person, data=psid)
+summary(income.mod.2)
+
+
+
+###Predicting Random Effects### 
+#initialize variables
+rand.eff<-matrix(NA,nrow=length(table(psid$person)),ncol=2)
+
+#Create Covariance Matrix of Random Effects
+a<-c(0.2816564, 0.53071*0.04899*0.187)
+b<-c(0.53071*0.04899*0.187, 0.0024)
+G<-rbind(a,b)
+sigma.2<-0.4672724
+
+#Add residuals to data set
+psid$resid<-residuals(income.mod)
+
+#Predict Random Effects with BLUP
+for(i in psid$person){
+  z<-cbind(1, psid$cyear[psid$person==i])
+  Sigma<-z%*%G%*%t(z)+diag(x=sigma.2, nrow=nrow(z))
+  rand.eff[i,]<-G%*%t(z)%*%solve(Sigma)%*%as.matrix(psid$resid[psid$person==i])
+}
+head(rand.eff)
+
+#create individual predicted coefficient vectors
+ind.coefs<-matrix(income.mod@beta,
+                  nrow=length(table(psid$person)),
+                  ncol=6,byrow=T)+cbind(rand.eff,0,0,0,0)
+head(ind.coefs)
+
+#predictions accounting for random effects, individual 1
+psid$const<-1
+psid.no.1<-psid[psid$person==1,c("const","cyear","sex","age","educ")]
+psid.no.1$sex<-1
+psid.no.1$inter<-psid.no.1$sex*psid.no.1$cyear
+predictions.1<-as.matrix(psid.no.1)%*%ind.coefs[1,]
+
+#graph in two forms
+plot(y=predictions.1,x=psid.no.1$cyear+1978,
+     ylab="Predicted Logged Income",
+     xlab="Year",main="Respondent 1",type='l')
+plot(y=exp(predictions.1),x=psid.no.1$cyear+1978,
+     ylab="Predicted Income",
+     xlab="Year",main="Respondent 1",type='l')
+
+
+
+###Residual Analyses###
+#initialize variables
+psid$std<-rep(NA,nrow(psid))
+psid$d<-rep(NA,nrow(psid))
+psid$p<-rep(NA,nrow(psid))
+
+#Create Standardized Residuals
+for(i in psid$person){
+z<-cbind(1, psid$cyear[psid$person==i])
+Sigma<-z%*%G%*%t(z)+diag(x=sigma.2, nrow=nrow(z))
+tL<-chol(Sigma)
+inv.lower<-solve(t(tL))
+psid$std[psid$person==i]<-inv.lower%*%as.matrix(psid$resid[psid$person==i])
+}
+
+#Mahalanobis Distance
+for(i in psid$person){
+r<-as.vector(psid$std[psid$person==i])
+psid$d[psid$person==i]<-t(r)%*%r
+psid$p[psid$person==i]<-1-pchisq(psid$d[i],df=length(r))
+}
+
+table(psid$person[psid$p<.05])
+
+#Figures
+#Histogram & Density Plot of Regular Residuals
+hist(psid$resid)
+densityplot(psid$resid)
+
+#Histogram & Density Plot of Transformed Residuals
+hist(psid$std)
+densityplot(psid$std)
+
+#Transformed Residuals Against Fitted Values
+mod.fit<-fitted(income.mod)
+plot(y=psid$std, x=mod.fit)
+
+#Transformed Residuals Against Time
+plot(y=psid$std, x=psid$cyear)
+
+#Semi-Variogram (crafted for "nlme" library)
+plot(Variogram(income.mod.2, form=~cyear|person), ylim=c(0,1.2))
+
+##############################################################
+
+#data
+data(psid)
+
+#Create a variable: "centered year"
+psid$cyear <- psid$year-78
+
+#Run a mixed-effects model with random intercept and random slope of year
+#Syntax for "lme4" library
+income.mod <- lmer(log(income)~cyear*sex+age+educ+(cyear|person), data=psid)
+summary(income.mod)
+
+#Example of how to create a variable: year observed
+for(i in psid$person){
+	psid$year.2[psid$person==i]<-(psid$year[psid$person==i][1])
+	}
+
+#Create a more interesting variable: age over time
+for(i in psid$person){
+	psid$age.2[psid$person==i]<-c(1:length(psid$person[psid$person==i]))-1
+	}
+
+#Age all jumbled together
+psid$age.3<-psid$age+psid$age.2
+
+#Decompose the cross-sectional and longitudinal effects of age
+income.mod.1 <- lmer(log(income)~age+age.2+educ+(1|person), data=psid)
+summary(income.mod.1)
+
+#Jumble everything together
+income.mod.2 <- lmer(log(income)~age.3+educ+(1|person), data=psid)
+summary(income.mod.2)
+#We're probably picking-up the effect of year here.
+
+##############################################################
+```
+
+
+### Time-Series Cross-Section Models
+
+```{r}
+library(plm)
+library(lmtest)
+library(pcse)
+library(nlme)
+library(foreign)
+
+#load data # Simulated Panel of 50 States Over 10 Years
+#state <-read.dta("http://spia.uga.edu/faculty_pages/monogan/teaching/pd/STATE2.DTA",
+#                 convert.factors=FALSE)
+state <-read.dta("STATE2.DTA",convert.factors=FALSE)
+### UNIT EFFECTS ###
+#Is the mean of y the same across units?
+anova.mod<-aov(y~state,data=state)
+summary(anova.mod)
+
+#With an OLS model, is the mean of the residuals the same across units?
+main.model <- lm(y~x, data=state); summary(main.model)
+anova.resids <- aov(main.model$residuals~state$state)
+summary(anova.resids)
+
+#fixed effects model
+fe.mod <- plm(y~x, data=state,index=c("state","time"),model="within")
+
+summary(fe.mod)
+
+#random effects model
+re.mod <- plm(y~x, data=state,index=c("state","time"),model="random")
+
+summary(re.mod)
+
+#Is random effects a sufficient specification?
+phtest(fe.mod, re.mod)
+
+### SERIAL CORRELATION AND HETEROSCEDASTICITY ###
+#Are residuals autocorrelated?
+pbgtest(fe.mod)
+pbgtest(re.mod)
+
+#Is there heteroscedasticity across units?
+by(data=fe.mod$residuals, INDICES=state$state,FUN=sd)
+by(data=re.mod$residuals, INDICES=state$state,FUN=sd)
+
+#Running a random effects model that specifies first-order serial correlation
+mod.lme <- lme(y ~ x, data = state, random = ~1 | state, 
+               correlation = corAR1(0, form = ~time | state))
+
+summary(mod.lme)
+
+#Running a fixed effects model that accounts for first-order serial correlation
+fe.gls.model <- gls(y~x+as.factor(state), 
+                    correlation=corAR1(0, form=~time|state), 
+                    data=state)
+
+summary(fe.gls.model)
+```
+
+
+`pggls` is a function for the estimation of linear panel models by general feasible generalized least squares, either with or without fixed effects. General FGLS is based on a two-step estimation process: first a model is estimated by OLS (pooling), fixed effects (within) or first differences (fd), then its residuals are used to estimate an error covariance matrix for use in a feasible-GLS analysis. This framework allows the error covariance structure inside every group (if `effect="individual"`, else symmetric) of observations to be fully unrestricted and is therefore robust against any type of intragroup heteroskedasticity and serial correlation. Conversely, this structure is assumed identical across groups and thus general FGLS estimation is inefficient under groupwise heteroskedasticity. Note also that this method requires estimation of T(T+1)/2 variance parameters, thus efficiency requires N > > T (if `effect="individual"`, else the opposite). The `model="random"` and `model="pooling"` arguments both produce an unrestricted FGLS model as in Wooldridge, Ch. 10, although the former is deprecated and included only for retro--compatibility reasons. If `model="within"` (the default) then a FEGLS (fixed effects GLS, see ibid.) is estimated; if `model="fd"` a FDGLS (first-difference GLS).
+
+```{r}
+#Running a model that allows for a serial correlation structure and heteroscedasticity within panel 
+mod.pggls <- plm::pggls(y~x, data=state, 
+                        index=c("state","time") ,model="random")
+
+summary(mod.pggls)
+
+#Running a fixed effects model and adding panel corrected standard errors
+fe.lm.model <- lm(y~x+as.factor(state), data=state)
+model.pcse<-pcse::pcse(fe.lm.model, groupN=state$state, groupT=state$time)
+
+summary(model.pcse)
+
+### HOW TO RUN A PANEL MODEL WITH A LAGGED DEPENDENT VARIABLE (IF ONE ISN'T ALREADY CODED) ###
+state$time <- as.numeric(state$time)
+state$state <- as.numeric(state$state)
+state$timelag <- state$time - 1
+
+deps <- as.data.frame(cbind(state$state, state$time, state$y, state$yar1))
+
+names(deps) <- c("state", "time", "yLag", "yar1lag")
+
+state2 <- merge(x=state, y=deps, 
+                by.x=c("timelag", "state"),
+                by.y=c("time", "state"))
+#cbind(state2$state, state2$time, state2$y, state2$yLag)
+
+#OLS with LDV
+mod.lagged <- lm(y~yLag+x, data=state2); summary(mod.lagged)
+lag.pcse<-pcse(mod.lagged,groupN=state2$state,groupT=state2$time)
+summary(lag.pcse)
+
+### INTERPRETING DYNAMICS ###
+# PULSE INPUT
+lag.coef<-mod.lagged$coefficients[2]
+#lag.coef<-.5 #hypothetical alternative, to illustrate a positive spillover
+input.coef<-mod.lagged$coefficients[3]
+
+times<-c(0:10)
+pred.pulse<-input.coef*lag.coef^times
+plot(y=c(0,pred.pulse),x=c(-1,times),type='l')
+
+# STEP INPUT
+pred.step<-cumsum(pred.pulse)
+plot(y=c(0,pred.step),x=c(-1,times),type='l')
+
+
+###UNIT ROOT TEST###
+#purtest implements several testing procedures that have been 
+#proposed to test unit root hypotheses with panel data.
+#purtest(y ~ 1, data = state, index = "state", pmax=8, test = "levinlin")
+#purtest(y ~ 1, data = state, index = "state", pmax=8, test = "ips")
+#purtest(y ~ 1, data = state, index = "state", pmax=8, test = "madwu")
+plm::purtest(y ~ 1, data = state, index = "state", pmax=8, test = "hadri")
+
+#################################################################
+
+```
+
+### Marginal Models: Generalized Estimating Equations
+
+```{r}
+#clean up
+rm(list=ls())
+
+#Load libraries
+library(geepack)
+library(reshape)
+library(nlme)
+library(car)
+library(MuMIn)
+library(multgee)
+ 
+###BINOMIAL EXAMPLE###
+#muscatine<-read.table(file.choose(), header=TRUE, sep="")
+muscatine.0<-read.table("muscatine.txt",header=TRUE,sep="")
+
+#turn obesity into a numeric variable
+muscatine.0$obese[muscatine.0$obese=="."]<-NA
+muscatine.0$obese<-as.numeric(muscatine.0$obese==1)
+muscatine<-na.omit(muscatine.0)
+
+#sort the data!
+muscatine<-with(muscatine,muscatine[order(id,cAge),])
+
+#Longer Model
+long.mod<-geepack::geeglm(obese~gender+I(cAge-12)+I((cAge-12)^2)+
+                            gender:I(cAge-12)+gender:I((cAge-12)^2), 
+                          id=id, waves=muscatine$occ, 
+                          family=binomial(link="logit"), 
+                          data=muscatine, scale.fix=TRUE,
+                          corstr="exchangeable")
+summary(long.mod)
+#Normally scale.fix=FALSE
+#'"independence"', '"exchangeable"', '"ar1"', '"unstructured"' and '"userdefined"'
+#Could only get AR(1) and indepdendence to work.
+
+#shorter model without interactions
+short.mod<-update(long.mod,.~.-gender:I(cAge-12)-gender:I((cAge-12)^2))
+summary(short.mod)
+
+#Wald test for whether trajectories differ
+anova(long.mod,short.mod)
+
+#short model with AR(1) instead
+short.mod.2<-geeglm(obese~gender+I(cAge-12)+I((cAge-12)^2), 
+                    id=id, waves=muscatine$occ, 
+                    family=binomial(link="logit"), 
+                    data=muscatine, scale.fix=TRUE,
+                    corstr="ar1")
+summary(short.mod.2)
+
+#compare models with fit statistics
+model.sel(long.mod,short.mod,short.mod.2,rank=QIC)
+
+
+
+###COUNT EXAMPLE###
+#clean up
+rm(list=ls())
+
+#data
+#leprosy<-read.table(file.choose(), header=TRUE, sep="")
+leprosy<-read.table("leprosy.txt", header=TRUE, sep="")
+
+#create id variable
+leprosy$id<-c(1:nrow(leprosy))
+
+#relevel treatment so that Placebo is the reference
+leprosy$drug<-relevel(leprosy$drug,"C")
+
+#create binary variable for whether an antibiotic was administered
+leprosy$antibiotic<-1-as.numeric(leprosy$drug=="C")
+
+#reshape data
+m.leprosy<-melt.data.frame(data=leprosy, measure.vars=c("pre","post"), id=c("id","drug","antibiotic"))
+
+#create time variable
+m.leprosy$time<-as.numeric(m.leprosy$variable=="post")
+
+#create inputs
+m.leprosy$a<-as.numeric(m.leprosy$time==1 & m.leprosy$drug=="A")
+m.leprosy$b<-as.numeric(m.leprosy$time==1 & m.leprosy$drug=="B")
+m.leprosy$treat<-as.numeric(m.leprosy$time==1 & m.leprosy$antibiotic==1)
+
+#sort the data
+m.leprosy<-with(m.leprosy,m.leprosy[order(id,time),])
+
+#Three Treatment Model
+mod.3<-geeglm(value~time+a+b, id=id, 
+              waves=m.leprosy$time, 
+              family=poisson(link="log"), 
+              data=m.leprosy,corstr="exchangeable")
+summary(mod.3)
+
+#Wald test for whether treated patients differed from placebo patients overall
+mod.3.alt<-update(mod.3,.~.-a-b); summary(mod.3.alt)
+anova(mod.3,mod.3.alt)
+
+#Two Treatment Model
+mod.2<-geeglm(value~time+treat, id=id, 
+              waves=m.leprosy$time, 
+              family=poisson(link="log"), 
+              data=m.leprosy,corstr="exchangeable")
+summary(mod.2)
+
+#compare models with fit statistics
+model.sel(mod.2,mod.3,rank=QIC)
+
+
+
+###ORDINAL AND NOMINAL USING "multgee"###
+rm(list=ls())
+
+#ORDINAL#
+data(arthritis)
+alt.fitmod <- ordLORgee(ordered(-y)~sqrt(time)*factor(trt),
+                        data=arthritis,id=id,
+                        LORstr="time.exch",
+                        repeated=time)
+summary(alt.fitmod)
+
+#NOMINAL#
+#The largest group becomes the baseline. Our largest group is independent housing.
+#y: 0=street living, 1=community living, 2=independent living
+#Coefficient set 1 refers to street living against independent living.
+#Coefficient set 2 refers to community living against independent living.
+data(housing)
+house.fitmod <- nomLORgee(y~factor(time)*sec,
+                          data=housing,id=id, 
+                          repeated=time, 
+                          LORstr="time.exch")
+summary(house.fitmod)
+
+###########################################################################
+```
+
+
+### Generalized Linear Mixed Effects Models
+
+```{r}
+#clean up
+rm(list=ls())
+
+#Load libraries
+library(lme4)
+library(reshape)
+library(car)
+
+###BINOMIAL EXAMPLE: OBESITY###
+#muscatine<-read.table(file.choose(), header=TRUE, sep="")
+muscatine.0<-read.table("muscatine.txt",header=TRUE,sep="")
+
+#turn obesity into a numeric variable
+muscatine.0$obese[muscatine.0$obese=="."]<-NA
+muscatine.0$obese<-as.numeric(muscatine.0$obese==1)
+muscatine<-na.omit(muscatine.0)
+
+#sort the data!
+muscatine<-with(muscatine,muscatine[order(id,cAge),])
+
+#Longer Model
+long.mod<-glmer(obese~gender+I(cAge-12)+I((cAge-12)^2)+
+                  gender:I(cAge-12)+gender:I((cAge-12)^2)+(1|id), 
+                family=binomial(link="logit"), data=muscatine)
+summary(long.mod)
+
+#shorter model without interactions
+short.mod<-update(long.mod,.~.-gender:I(cAge-12)-gender:I((cAge-12)^2))
+summary(short.mod)
+
+#Likelihood ratio test for whether trajectories differ
+anova(long.mod,short.mod)
+
+
+
+###FIRST COUNT EXAMPLE: EPILEPSY SEIZURES###
+#clean up
+rm(list=ls())
+
+#data
+epilepsy<-read.table("epilepsy.txt", header=TRUE, sep="")
+
+#reshape data
+m.epilepsy<-melt.data.frame(data=epilepsy, 
+                            measure.vars=c("t0","t1","t2","t3","t4"), 
+                            id=c("id","treat","age"))
+
+#create visit variable
+m.epilepsy$visit<-as.numeric(substr(m.epilepsy$variable,2,2))
+
+#create dummy for time
+m.epilepsy$dummy<-1-as.numeric(m.epilepsy$visit==0)
+
+#create weeks variable
+m.epilepsy$weeks<-2*as.numeric(substr(m.epilepsy$variable,2,2))
+
+#rescale seizures variable
+m.epilepsy$logT[m.epilepsy$weeks==0]<-log(8)
+m.epilepsy$logT[m.epilepsy$weeks!=0]<-log(2)
+
+#Book Model
+book.mod<-glmer(value~(dummy|id)+treat+dummy*treat, 
+                offset=logT, family=poisson(link="log"), 
+                data=m.epilepsy)
+summary(book.mod)
+
+#Outlier Deleted Model
+no.outlier<-glmer(value~(dummy|id)+treat+dummy*treat, 
+                  offset=logT, family=poisson(link="log"), 
+                  subset=id!=49, data=m.epilepsy)
+summary(no.outlier)
+
+#Weeks Model
+weeks.mod<-glmer(value~(weeks|id)+treat+weeks*treat, 
+                 offset=logT, family=poisson(link="log"), 
+                 data=m.epilepsy)
+summary(weeks.mod)
+
+#Plot expected counts for treated and untreated IF random effects are zero!
+week.index<-c(0:8)
+e.treated<-exp(1.10397+0.1748-(.01134+.04672)*week.index)
+e.untreated<-exp(1.10397-(.01134)*week.index)
+plot(y=e.treated,x=week.index,type='l',ylim=c(2,5))
+lines(y=e.untreated,x=week.index,lty=2)
+
+
+
+###SECOND COUNT EXAMPLE: REVISITING LEPROSY DATA###
+#clean up
+rm(list=ls())
+
+#data
+#leprosy<-read.table(file.choose(), header=TRUE, sep="")
+leprosy<-read.table("leprosy.txt", header=TRUE, sep="")
+
+#create id variable
+leprosy$id<-c(1:nrow(leprosy))
+
+#relevel treatment so that Placebo is the reference
+leprosy$drug<-relevel(leprosy$drug,"C")
+
+#create binary variable for whether an antibiotic was administered
+leprosy$antibiotic<-1-as.numeric(leprosy$drug=="C")
+
+#reshape data
+m.leprosy<-melt.data.frame(data=leprosy, 
+                           measure.vars=c("pre","post"), 
+                           id=c("id","drug","antibiotic"))
+
+#create time variable
+m.leprosy$time<-as.numeric(m.leprosy$variable=="post")
+
+#create inputs
+m.leprosy$a<-as.numeric(m.leprosy$time==1 & m.leprosy$drug=="A")
+m.leprosy$b<-as.numeric(m.leprosy$time==1 & m.leprosy$drug=="B")
+m.leprosy$treat<-as.numeric(m.leprosy$time==1 & m.leprosy$antibiotic==1)
+
+#sort the data
+m.leprosy<-with(m.leprosy,m.leprosy[order(id,time),])
+
+#Three Treatment Model
+mod.3<-glmer(value~time+a+b+(1|id), 
+             family=poisson(link="log"), 
+             data=m.leprosy)
+summary(mod.3)
+
+#Likelihood ratio test for whether treated patients 
+#differed from placebo patients overall
+mod.3.alt<-update(mod.3,.~.-a-b); summary(mod.3.alt)
+anova(mod.3,mod.3.alt)
+
+###########################################################
+```
+
+### Missing Data in Panels and Dropout
+
+```{r cache=TRUE}
+#clean up
+rm(list=ls())
+
+#load libraries
+library(lme4)
+library(reshape)
+library(mice)
+
+#load data
+amenorrhea<-read.table("amenorrhea.txt", header=TRUE, sep="")
+
+#turn status into a numeric variable
+amenorrhea$status[amenorrhea$status=="."]<-NA
+amenorrhea$status<-as.numeric(amenorrhea$status==1)
+
+#start time at 0 (necessary for convergence)
+amenorrhea$time<-amenorrhea$time-1
+
+#Create Experimental Time Terms
+amenorrhea$dt<-amenorrhea$time*amenorrhea$dose
+amenorrhea$dt2<-I(amenorrhea$time^2)*amenorrhea$dose
+
+#Book Model from Chapter 14 (differ slightly with time rescale, but they converge
+book.amenorrhea<-glmer(status~(1|id)+time+I(time^2)+dt+dt2, 
+                       family=binomial(link="logit"), 
+                       data=amenorrhea)
+summary(book.amenorrhea)
+
+#reshape long to wide
+wide<-reshape(amenorrhea, idvar=c("id", "dose"), 
+              timevar="time", direction="wide")
+
+#multiple random imputation using predictive mean matching like the book
+m<-5 #number of imputations, definitely worth increasing!
+w.imp<-mice(wide, m=m, defaultMethod="pmm")
+
+#reshape imputed data sets to long form
+long.data<-list(NA,m)
+for(i in 1:m)
+	{
+		long.data[[i]]<-melt.data.frame(data=complete(w.imp,i),
+		                        measure.vars=c("status.0","status.1",
+		                                       "status.2","status.3"), 
+		                        id=c("id","dose"))
+		long.data[[i]]$time<-as.numeric(substr(long.data[[i]]$variable,8,8))
+		long.data[[i]]$dt<-long.data[[i]]$time*long.data[[i]]$dose
+		long.data[[i]]$dt2<-I(long.data[[i]]$time^2)*long.data[[i]]$dose
+	}
+
+#Now: What does our model look like with imputed data?
+#Note: "status" is now "value"
+imputed.models<-list(NA,m)
+for(i in 1:m)
+	{
+		imputed.models[[i]]<-glmer(value~(1|id)+time+I(time^2)+dt+dt2, 
+		                           family=binomial(link="logit"), 
+		                           data=long.data[[i]])
+		summary(imputed.models[[i]])	
+	}
+
+#Average coefficients
+coeffs<-NULL
+for(i in 1:m)
+	{
+		coeffs<-rbind(coeffs,fixef(imputed.models[[i]]))
+		}
+avg.coef<-apply(coeffs,2,mean)
+
+#Between variance of coefficient estimates
+between<-apply(coeffs,2,var)
+
+#Within variance of coefficient estimates
+errVars<-NULL
+for(i in 1:m)
+	{
+		errVars<-rbind(errVars,diag(vcov(imputed.models[[i]])))
+		}
+within<-apply(errVars,2,mean)
+
+#Obtain Standard Errors of Averaged Fixed Effects
+final.se <- sqrt(within + ((m+1)/m)*between)
+
+#t- or z-ratios
+test.stats<-avg.coef/final.se
+
+#degrees of freedom
+deg.free <- (m-1)*(1+(1/(m+1))*within/between)^2
+
+#p-values for z-test
+p.values.z<-2*(1-pnorm(abs(test.stats)))
+
+#p-values for t-test
+p.values.t<-2*(1-pt(abs(test.stats), df=deg.free))
+
+#All results from imputation
+avg.coef
+final.se
+test.stats
+p.values.t
+
+#make a LaTeX table
+library(xtable)
+xtable(cbind(avg.coef,final.se,test.stats,p.values.t),digits=4)
+
+#Compare to ignoring missing
+summary(book.amenorrhea)
+###########################################################
+
+```
+
+
+### Event History Models: Parameteric Models and Cox Proportional Hazards Models
+
+```{r}
+#clean up
+rm(list=ls())
+
+#packages
+library(foreign)	#Stata data
+library(survival)	#Sufficient for Cox model
+library(eha)		#Parametric models and another version of Cox
+
+#load cabinet duration data from Brad Jones's website
+#http://psfaculty.ucdavis.edu/bsjjones/cabinet.dta
+cab<-read.dta("cabinet.dta")
+
+###WEIBULL MODEL###
+#Weibull Regression: Proportional hazards model with baseline hazard(s) 
+#from the Weibull family of distributions. Allows for stratification 
+#with different scale and shape in each stratum, and left truncated 
+#and right censored data.
+
+#results are consistent with p.61, except for the constant
+weib.cabinet<-eha::weibreg(Surv(time=durat, event=censor)~
+                        invest+polar+numst+format+postelec+caretakr, 
+                      data=cab)
+summary(weib.cabinet)
+
+###LOG-LOGISTIC MODEL###
+#Parametric Proportional Hazards Regression
+#Proportional hazards model with parametric baseline hazard(s). 
+#Allows for stratification with different scale and shape 
+#in each stratum, and left truncated and right censored data.
+log.logis.cabinet<-eha::phreg(Surv(time=durat, event=censor)~
+                           invest+polar+numst+format+postelec+caretakr, 
+                         data=cab, dist="loglogistic")
+summary(log.logis.cabinet)
+
+###COX PROPORTIONAL HAZARDS MODEL###
+#Cox proportional hazards regression model. 
+#Time dependent variables, time dependent strata, 
+#multiple events per subject, and other extensions 
+#are incorporated using the counting process formulation 
+#of Andersen and Gill.
+
+#Efron is Default, see p. 60
+#Note the two possible interpretations
+cox.cabinet<-survival::coxph(Surv(durat, censor)~
+                     invest+polar+numst+format+postelec+caretakr, 
+                   data=cab)
+summary(cox.cabinet)
+
+#Breslow, see p. 60
+#Note the two possible interpretations
+cox.cabinet.2<-coxph(Surv(durat, censor)~
+                       invest+polar+numst+format+postelec+caretakr, 
+                     data=cab, method="breslow")
+summary(cox.cabinet.2)
+
+#Alternative estimator in "eha"
+cox.cabinet.3<-eha::coxreg(Surv(durat, censor)~
+                        invest+polar+numst+format+postelec+caretakr, 
+                      data=cab, method="breslow")
+summary(cox.cabinet.3)
+
+#HW: load UN peacekeeping data from Brad Jones's website
+#Run two event history models: one parametric and one Cox
+#un<-read.dta("//spia.uga.edu/faculty_pages/monogan/teaching/pd/UNFINAL.dta")
+
+###########################################################
+
+
+###ADDITIONAL TOPICS FOR FINAL EVENT HISTORY CLASS###
+
+###RESIDUAL ANALYSES###
+#"survival" package works a bit better here.
+#parametric survival regression model. 
+#These are location-scale models for an arbitrary transform 
+#of the time variable; the most common cases use a log 
+#transformation, leading to accelerated failure time models.
+
+#Weibull Model, accelerated failure time form. Residuals in time scale for "response".
+weib.cabinet.b<-survival::survreg(Surv(time=durat, event=censor)~
+                          invest+polar+numst+format+postelec+caretakr, 
+                        data=cab, dist='weibull')
+summary(weib.cabinet.b)
+t.resid<-residuals(weib.cabinet.b,type="response")
+plot(y=t.resid,x=cab$polar)
+lines(lowess(x=cab$polar,y=t.resid),col='red')
+
+#Log-Logistic Model, accelerated failure time form. Residuals in time scale for "response".
+log.logis.cabinet.b<-survreg(Surv(time=durat, event=censor)~
+                               invest+polar+numst+format+postelec+caretakr, 
+                             data=cab, dist='loglogistic')
+summary(log.logis.cabinet.b)
+t2.resid<-residuals(log.logis.cabinet.b,type="response")
+plot(y=t2.resid,x=cab$polar)
+lines(lowess(x=cab$polar,y=t2.resid),col='red')
+
+#Cox Model
+m.resid<-residuals(cox.cabinet,type="martingale")
+plot(y=m.resid,x=cab$polar)
+lines(lowess(x=cab$polar,y=m.resid),col='red')
+
+###FRAILTY MODELS###
+#"survival" package works a bit better here.
+
+#create an ID variable
+cab$ID<-row.names(cab)
+
+#Log-Logistic Model, accelerated failure time form. Residuals in time scale for "response".
+log.logis.cabinet.b.frail<-survreg(Surv(time=durat, event=censor)~
+                      invest+polar+numst+format+postelec+caretakr+
+                        frailty.gaussian(ID,method="aic"), 
+                      data=cab, dist='loglogistic')
+#summary(log.logis.cabinet.b.frail)
+
+#Cox Model
+cox.cabinet.2.frail<-coxph(Surv(durat, censor)~
+                      invest+polar+numst+format+postelec+caretakr+
+                        frailty.gamma(ID,method="em"), 
+                      data=cab, method="breslow")
+summary(cox.cabinet.2.frail)
+###########################################################
+
+```
+
+
+### Event History Models: Models for Discrete Time and Time-Varying Covariates
+
+```{r}
+#Discrete-Time Model and Conditional Logit Code
+#clean up
+rm(list=ls())
+
+#load libraries
+library(foreign)
+library(lme4)
+library(survival)
+library(mgcv)
+
+#Load Data
+#cong<-read.dta('http://psfaculty.ucdavis.edu/bsjjones/career.dta')
+cong<-read.dta('career.dta')
+
+#Change Stata Names
+cong$d<-cong[,34]
+cong$d.2<-abs(1-cong$d)
+cong$t<-cong[,35]
+
+###SPECIFYING THE BASELINE HAZARD RATE IN A LOGIT MODEL###
+###NOTE: STANDARD ERRORS ARE NOT CLUSTER-CORRECTED, AS IN THE BOOK###
+###ALTERNATIVE: FRAILTY TERM BY MEMBER###
+#Exponential
+exp.cong<-glm(d~rep, family=binomial(link="logit"), data=cong)
+summary(exp.cong)
+exp.cong.2<-lme4::glmer(d~rep+(1|memberid), 
+                  family=binomial(link="logit"), 
+                  data=cong)
+summary(exp.cong.2)
+
+#Linear function of time
+linear.cong<-glm(d~rep+t, 
+                 family=binomial(link="logit"), data=cong)
+summary(linear.cong)
+linear.cong.2<-glmer(d~rep+t+(1|memberid), 
+                     family=binomial(link="logit"), 
+                     data=cong)
+summary(linear.cong.2)
+
+#Quadratic function of time
+quad.cong<-glm(d~rep+duration+I(duration^2), 
+               family=binomial(link="logit"), 
+               data=cong)
+summary(quad.cong)
+quad.cong.2<-glmer(d~rep+duration+I(duration^2)+(1|memberid), 
+                   family=binomial(link="logit"), 
+                   data=cong)
+summary(quad.cong.2)
+
+#Log of duration
+log.cong<-glm(d~rep+log(duration), 
+              family=binomial(link="logit"), 
+              data=cong)
+summary(log.cong)
+log.cong.2<-glmer(d~rep+log(duration)+(1|memberid), 
+                  family=binomial(link="logit"),
+                  data=cong)
+summary(log.cong.2)
+
+
+```
+
+
+Fits a generalized additive model (GAM) to data, the term 'GAM' being taken to include any quadratically penalized GLM and a variety of other models estimated by a quadratically penalised likelihood type approach (see `family.mgcv`). The degree of smoothness of model terms is estimated as part of fitting. `gam` can also fit any GLM subject to multiple quadratic penalties (including estimation of degree of penalization). Confidence/credible intervals are readily available for any quantity predicted using a fitted model.
+
+Smooth terms are represented using penalized regression splines (or similar smoothers) with smoothing parameters selected by GCV/UBRE/AIC/REML or by regression splines with fixed degrees of freedom (mixtures of the two are permitted). Multi-dimensional smooths are available using penalized thin plate regression splines (isotropic) or tensor product splines (when an isotropic smooth is inappropriate), and users can add smooths. Linear functionals of smooths can also be included in models. For an overview of the smooths available see `smooth.terms`. For more on specifying models see `gam.models`, `random.effects` and `linear.functional.terms`. For more on model selection see `gam.selection`. Do read `gam.check` and `choose.k`.
+
+```{r}
+
+#Smoothed spline
+#Generalized Additive Models With Integrated Smoothness Estimation
+spline.cong<-mgcv::gam(d~rep+s(duration), 
+                 family=binomial(link="logit"), 
+                 data=cong)
+summary(spline.cong)
+plot(spline.cong)
+spline.cong.2<-gam(d~rep+s(duration)+s(memberid,bs='re'), 
+                   family=binomial(link="logit"), 
+                   data=cong)
+summary(spline.cong.2)
+plot(spline.cong.2)
+
+###Cox/Conditional Logit Model###
+#Estimates a logistic regression model by maximising the conditional likelihood. 
+conditional.cong<-survival::clogit(d~rep+strata(t),
+                         method="approximate",
+                         data=cong)
+summary(conditional.cong)
+
+###########################################################
+
+```
+
+
+### Repeated Measures and Multiple Source 
+
+```{r}
+#clean up
+rm(list=ls())
+
+#packages
+library(lme4)
+library(nlme)
+library(lattice)
+library(geepack)
+library(reshape)
+
+###REPEATED MEASURES###
+headache<-read.table("headache.txt", header=TRUE, sep="")
+head(headache)
+table(headache$treatment.a[headache$sequence==1],
+      headache$period[headache$sequence==1])
+table(headache$treatment.a[headache$sequence==2],
+      headache$period[headache$sequence==2])
+table(headache$treatment.a[headache$sequence==3],
+      headache$period[headache$sequence==3])
+table(headache$treatment.a[headache$sequence==4],
+      headache$period[headache$sequence==4])
+table(headache$treatment.a[headache$sequence==5],
+      headache$period[headache$sequence==5])
+table(headache$treatment.a[headache$sequence==6],
+      headache$period[headache$sequence==6])
+
+#relevel treatment
+headache$treatment.a<-relevel(headache$treatment.a, "P")
+
+#carryover effects
+headache$carry.a<-as.numeric(headache$sequence%in%c(2,6) & headache$period==1)
+headache$carry.b<-as.numeric(headache$sequence%in%c(1,4) & headache$period==1)
+
+#MODEL WITH CARRYOVER EFFECTS
+headache.mod <- lmer(response~as.factor(treatment.a)+
+                       period+carry.a+carry.b+(1|id), 
+                     data=headache)
+summary(headache.mod)
+
+#Differences in treatment effects
+num<-2.5057-1.9519; num
+dem<- sqrt((0.3486)^2 -2* 0.565*(0.3486)*(0.3480)+(0.3480)^2); dem
+z<-num/dem; z
+p<-2*(1-pnorm(abs(z))); p
+
+#Differences in carryover effects
+num.2<- -0.8775-0.1864; num.2
+dem.2<- sqrt((0.5257)^2 -2*0.509*(0.5257)*(0.5237)+(0.5237)^2); dem.2
+z.2<-num.2/dem.2; z.2
+p.2<-2*(1-pnorm(abs(z.2))); p.2
+
+
+#MODEL WITH NO CARRYOVER
+no.carryover <- lmer(response~as.factor(treatment.a)+
+                       period+(1|id), 
+                     data=headache)
+summary(no.carryover)
+
+#Differences in treatment effects
+num.3<-2.84104-1.82015; num.3
+dem.3<- sqrt((0.30209)^2 -2*0.707*(0.30209)*(0.30269)+(0.30269)^2); dem.3
+z.3<-num.3/dem.3; z.3
+p.3<-2*(1-pnorm(abs(z.3))); p.3
+
+
+
+###MULTIPLE SOURCES###
+#clean up
+rm(list=ls())
+
+#load data
+ccs<-read.table("ccs.txt", header=TRUE, sep="",na.strings = ".")
+
+#reshape long and then SORT!!!
+ccs.long<-melt.data.frame(data=ccs, 
+                          measure.vars=c("parentRep","teacherRep"), 
+                          id=c("childID", "physical", "singlePar"))
+ccs.long<-with(ccs.long,ccs.long[order(childID,variable),])
+
+#relevel informant variable
+ccs.long$variable<-relevel(ccs.long$variable, "teacherRep")
+
+#GEE model
+ccs.mod<-geepack::geeglm(value~as.factor(variable)*physical+singlePar, 
+                id=childID,  
+                family=binomial(link="logit"), 
+                data=ccs.long, 
+                scale.fix=TRUE, 
+                corstr="exchangeable")
+summary(ccs.mod)
+
+###########################################################
+
+```
+
+### Models for Multiple Events
+
+```{r}
+###REPEATED EVENTS COX MODEL###
+##MILITARIZED INTERVENTIONS##
+#clean up
+rm(list=ls())
+
+#load packages
+library(foreign)
+library(survival)
+
+#load data
+#http://psfaculty.ucdavis.edu/bsjjones/icpsr_omi_spellsplit.dta
+interventions<-read.dta("icpsr_omi_spellsplit.dta")
+
+#Model: compare to Box-Steffensmeier & Jones Table 10.2.
+#Note: frailty terms would be ideal.
+conditional.interventions<-clogit(event~pbal+ctg+idem+tdem+strata(RS),
+                                  data=interventions)
+summary(conditional.interventions)
+
+
+
+###COMPETING RISKS COX MODEL###
+##MELANOMA PATIENT SURVIVAL TIME##
+#clean up
+rm(list=ls())
+
+#load package and data
+library(riskRegression)
+data(Melanoma)
+#backup file: Melanoma.csv
+
+#Plan A: Different predictors for each cause.
+fit1 <- riskRegression::CSC(list(Hist(time,status)~
+                   sex,Hist(time,status)~
+                   invasion+epicel+age),
+            data=Melanoma)
+print(fit1)
+#Plan B: Same predictors for each cause.
+fit2 <- CSC(Hist(time,status)~
+              sex+invasion+epicel+age,
+            data=Melanoma)
+print(fit2)
+
+
+
+###MULTINOMIAL LOGIT COMPETING RISKS MODEL###
+##MEANS OF CONGRESSIONAL EXIT##
+#clean up
+rm(list=ls())
+
+#load package
+library(nnet)
+library(foreign)
+
+#Load Data
+cong<-read.dta('career.dta')
+
+#model: compare to Box-Steffensmeier & Jones Table 10.6
+#Note: frailty terms would be ideal. May need "MCMCglmm"
+four.exits<-multinom(event~rep+redist+scandal+opengov+
+                       opensen+leader+age+priorm+log(duration),
+                     data=cong)
+summary(four.exits)
+
+
+###########################################################
+
+```
+
+### Multilevel Models
+
+```{r}
+###CHAPTER 8: USING PACKAGES TO APPLY ADVANCED MODELS###
+
+##REQUIRED DATA FILES: BPchap7.dta, SinghJTP.dta, LL.csv, and UN.csv
+
+##SECTION 8.1: MULTILEVEL MODELS WITH lme4##
+#clean up
+rm(list=ls())
+
+#load package
+library(foreign)
+
+#load and clean data
+#evolution<-read.dta("http://j.mp/BPchap7")
+evolution<-read.dta("BPchap7.dta")
+evolution$female[evolution$female==9]<-NA
+evolution<-subset(evolution,!is.na(female))
+
+#load package
+#install.packages("lme4")
+library(lme4)
+
+#estimate linear model of hours spent teaching evolution 
+#with random effects by state
+hours.ml<-lmer(hrs_allev~phase1+senior_c+ph_senior+
+                 notest_p+ph_notest_p+female+biocred3+
+                 degr3+evol_course+certified+idsci_trans+
+                 confident+(1|st_fip),
+               data=evolution)
+summary(hours.ml)
+
+#SECTION 8.1.2: MULTILEVEL LOGISTIC REGRESSION#
+#load packages
+library(lme4)
+library(foreign)
+
+#load data
+#voting<-read.dta("http://j.mp/SINGHjtp")
+voting<-read.dta("SinghJTP.dta")
+
+#estimate logistic regression model of voting for incumbents 
+#with random effects by country-year
+inc.linear.ml<-glmer(votedinc~distanceinc+(1|cntryyear),
+                     family=binomial(link="logit"),
+                     data=voting)
+summary(inc.linear.ml)
+
+#estimate logistic regression model of voting for incumbents 
+#with random intercepts and random coefficients on ideological 
+#distance by country-year
+inc.linear.ml.2<-glmer(votedinc~distanceinc+(distanceinc|cntryyear),
+                       family=binomial(link="logit"),
+                       data=voting)
+summary(inc.linear.ml.2)
+
+
+
+
+###THREE-LEVEL EXAMPLE FROM FITZMAURICE, LAIRD AND WARE TABLE 22.3###
+#clean up
+rm(list=ls())
+
+#required libraries
+library(lme4)
+
+#load data
+smoking<-read.table("tvsfp.txt", header=TRUE)
+
+#Three-Level Model (students within classes within schools)
+smoking.mod<-lmer(post~pre+schT+tvT+schT*tvT+
+                    (1|schoolID)+(1|classID), 
+                  data=smoking)
+summary(smoking.mod)
+
+###Another neat dataset from Gelman & Hill. CBS 1988 exit poll data.###
+#Logit Model of Bush Support in 1988 as a function of race and sex, 
+#with a random effect for state
+#elec.88<-read.table("http://www.stat.columbia.edu/~gelman/arm/examples/election88/polls.subset.dat", header=TRUE)
+
+###########################################################
+
+```
+
+### Sample Size and Power
+
+```{r}
+#load package
+library(pwr)
+
+###Difference of means test? 
+###What sample for an effect size of 1? 
+###Number of observations per group.###
+#Note: Effect size as defined by Cohen: 
+#absolute difference divided by standard deviation
+pwr.t.test(d=1, sig.level=.05, power=.8, 
+           type="two.sample", alternative="two.sided")
+
+#Hand calculation if you were content with a normal distribution. 
+#Number of observations per group.
+(qnorm(.975)+qnorm(.8))^2/(.5*(1-.5))/2
+
+#Hand calculation if you wanted to hunt-and-pack t-distribution 
+#for degrees of freedom. Number of observations per group.
+(qt(.975,df=32)+qt(.8,df=32))^2/(.5*(1-.5))/2
+
+###Two samples of different sizes. Pick one group, 
+###find the size for the other group.###
+pwr.t2n.test(d=0.6,n1=90,n2=NULL,alternative="greater",power=.8)
+pwr.t2n.test(d=0.6,n1=NULL,n2=60,alternative="greater",power=.8)
+
+###ANOVA: Can we explain 2% of variance with 1 predictor?
+###Number of observations overall.###
+pwr.f2.test(u=1, f2=.02/.98, sig.level=.05, power=.8)
+
+#Can we detect joint significance of three predictors if 
+#they can explain an extra 10 percentage poitns of variance 
+#if the model explains 60% total?
+pwr.f2.test(u=3, f2=.10/.40, sig.level=.05, power=.8)
+
+
+###Panel Example: Section 20.3.4 in book. Number of observations overall.###
+#hard coded version
+sigma.beta.2<-2.8 #variance of coefficient of interest
+delta<-1.2 #minimum treatment effect
+(((qnorm(.975)+qnorm(.9))^2)*sigma.beta.2)/(.5*(1-.5)*delta^2) #result
+
+#Equation 20.2 as a Function#
+#Note that you may want to consider Euqation 20.4 to get a sense of sigma.beta.2.
+eqn.20.2<-function(alpha,power,delta,sigma.beta.2,split){
+	sample.size<-(((qnorm(1-(alpha/2))+qnorm(power))^2)*sigma.beta.2)/
+	  (split*(1-split)*delta^2) 
+	return(sample.size)
+}	
+
+#replicate
+eqn.20.2(.05,.9,1.2,2.8,.5)
+
+#content with 80% power
+eqn.20.2(alpha=.05,power=.8,delta=1.2,sigma.beta.2=2.8,split=.5)
+```
+
+### TODO
+
+http://yiqingxu.org/teaching/talks/northwestern2018.pdf
+
+
+
+
+
+
+
+
